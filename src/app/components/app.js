@@ -52,14 +52,17 @@ const SelfTile = asComponent({
   render(props) {
     const { state } = props;
 
+    // Show screen share if active, otherwise show local camera
+    const displayStream = state.screenShareActive ? state.screenStream : state.localStream;
+
     return html`
       <div class="peer-tile peer-tile--self">
-        ${state.localStream
+        ${displayStream
           ? html`<video
               autoplay
               playsinline
               muted
-              .srcObject=${state.localStream}
+              .srcObject=${displayStream}
             ></video>`
           : html`<div class="peer-avatar peer-avatar--self">${state.myName.charAt(0).toUpperCase()}</div>`
         }
@@ -75,7 +78,7 @@ const SelfTile = asComponent({
             }}
           >
         </div>
-        <div class="self-label">You</div>
+        <div class="self-label">You${state.screenShareActive ? ' (Screen)' : ''}</div>
       </div>
     `;
   },
@@ -141,6 +144,11 @@ const Toolbar = (state) => html`
         >${state.videoEnabled ? '📹' : '📹🚫'}</button>
       `
     }
+    <button
+      class=${state.screenShareActive ? 'active' : ''}
+      onclick=${() => dispatch('toggleScreenShare')}
+      title=${state.screenShareActive ? 'Stop Sharing' : 'Share Screen'}
+    >${state.screenShareActive ? '🖥️✓' : '🖥️'}</button>
     <button
       onclick=${() => dispatch('startInvite')}
       disabled=${state.invitePhase !== 'idle'}

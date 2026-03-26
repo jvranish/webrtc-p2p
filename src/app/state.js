@@ -59,6 +59,11 @@ export class AppState {
   audioEnabled = true;
   videoEnabled = true;
 
+  screenShareActive = false;
+
+  /** @type {MediaStream | null} */
+  screenStream = null;
+
   /** @type {'idle' | 'offering' | 'waiting-answer'} */
   invitePhase = 'idle';
 
@@ -85,6 +90,7 @@ export class AppState {
     onPeerDisconnected: (id) => this.#onPeerDisconnected(id),
     onMessage: (fromId, msg) => this.#onMessage(fromId, msg),
     onRemoteStream: (peerId, stream) => this.setPeerStream(peerId, stream),
+    onScreenShare: (peerId, active) => this.#onScreenShare(peerId, active),
   });
 
   /** @param {ConnectedPeer} peer */
@@ -127,7 +133,19 @@ export class AppState {
         peer.name = msg.name;
         scheduleRender();
       }
+    } else if (msg.type === 'SCREEN_SHARE') {
+      this.#onScreenShare(fromId, msg.active);
     }
+  }
+
+  /**
+   * @param {string} peerId
+   * @param {boolean} active
+   */
+  #onScreenShare(peerId, active) {
+    // Store screen share state per peer (could be extended in the future)
+    console.log(`Peer ${peerId} screen share: ${active ? 'started' : 'stopped'}`);
+    // The stream update will come through onRemoteStream via the track event
   }
 
   /** @param {string} name */
@@ -256,6 +274,76 @@ export class AppState {
     for (const track of videoTracks) {
       track.enabled = this.videoEnabled;
     }
+  }
+
+  async toggleScreenShare() {
+    if (this.screenShareActive) {
+      // Stop screen sharing
+      await this.#stopScreenShare();
+    } else {
+      // Start screen sharing
+      await this.#startScreenShare();
+    }
+  }
+
+  async #startScreenShare() {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+
+      this.screenStream = screenStream;
+      this.screenShareActive = true;
+
+      // Replace video track in all peer connections
+      const videoTrack = screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        await this.#mesh.replaceVideoTrack(videoTrack);
+
+        // Notify peers that we're sharing screen
+        this.#mesh.broadcast({ type: 'SCREEN_SHARE', active: true });
+
+        // Listen for the user stopping the share via browser UI
+        videoTrack.addEventListener('ended', () => {
+          this.#stopScreenShare().catch(err => console.error('Failed to stop screen share:', err));
+        });
+      }
+
+      scheduleRender();
+    } catch (err) {
+      console.error('Failed to start screen share:', err);
+      this.screenShareActive = false;
+      this.screenStream = null;
+      scheduleRender();
+    }
+  }
+
+  async #stopScreenShare() {
+    if (!this.screenStream) return;
+
+    // Stop all screen share tracks
+    for (const track of this.screenStream.getTracks()) {
+      track.stop();
+    }
+    this.screenStream = null;
+    this.screenShareActive = false;
+
+    // Restore camera video track if we have local stream
+    if (this.localStream) {
+      const videoTrack = this.localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        await this.#mesh.replaceVideoTrack(videoTrack);
+      }
+    } else {
+      // No camera - remove video track
+      await this.#mesh.replaceVideoTrack(null);
+    }
+
+    // Notify peers that we stopped sharing
+    this.#mesh.broadcast({ type: 'SCREEN_SHARE', active: false });
+
+    scheduleRender();
   }
 
   /**

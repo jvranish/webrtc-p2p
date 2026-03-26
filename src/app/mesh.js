@@ -38,6 +38,7 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(peerId: string) => void} onPeerDisconnected
  * @property {(fromId: string, message: MeshMessage) => void} onMessage
  * @property {(peerId: string, stream: MediaStream) => void} onRemoteStream
+ * @property {(peerId: string, active: boolean) => void} onScreenShare
  */
 
 /**
@@ -204,6 +205,38 @@ export class PeerMesh {
       for (const track of tracks) {
         peer.connection.addTrack(track, stream);
       }
+    }
+  }
+
+  /**
+   * Replace the video track in all peer connections (for screen sharing).
+   * @param {MediaStreamTrack | null} newTrack - New video track, or null to remove video
+   * @returns {Promise<void>}
+   */
+  async replaceVideoTrack(newTrack) {
+    for (const peer of this.#peers.values()) {
+      const senders = peer.connection.getSenders();
+      const videoSender = senders.find(s => s.track?.kind === 'video');
+
+      if (videoSender) {
+        // Replace existing video track
+        await videoSender.replaceTrack(newTrack);
+      } else if (newTrack) {
+        // No video sender exists yet, add the track
+        // Create a stream for the track
+        const stream = new MediaStream([newTrack]);
+        peer.connection.addTrack(newTrack, stream);
+      }
+    }
+
+    // Update stored local tracks
+    if (newTrack) {
+      // Remove old video track and add new one
+      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
+      this.#localTracks.push(newTrack);
+    } else {
+      // Remove video track
+      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
     }
   }
 
