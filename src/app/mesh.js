@@ -118,6 +118,14 @@ export class PeerMesh {
       // Update the peer ID mapping BEFORE setting remote description
       // so that any ontrack events get the correct peer ID
       this.#connectionToPeerId.set(connection, answerData.peerId);
+
+      // Also update the negotiation state key from 'pending' to the actual peer ID
+      const pendingState = this.#negotiationState.get('pending');
+      if (pendingState) {
+        this.#negotiationState.delete('pending');
+        this.#negotiationState.set(answerData.peerId, pendingState);
+      }
+
       await connection.setRemoteDescription(new RTCSessionDescription({ sdp: answerData.sdp, type: answerData.type }));
       await this.#waitChannelOpen(channel);
       this.#registerPeer(answerData.peerId, answerData.name, connection, channel, true);
@@ -174,7 +182,9 @@ export class PeerMesh {
    */
   send(peerId, message) {
     const peer = this.#peers.get(peerId);
-    if (peer?.channel.readyState === 'open') peer.channel.send(JSON.stringify(message));
+    if (peer?.channel.readyState === 'open') {
+      peer.channel.send(JSON.stringify(message));
+    }
   }
 
   /**
@@ -290,6 +300,14 @@ export class PeerMesh {
    * @returns {Promise<RTCSessionDescription>}
    */
   async #gatherOffer(connection) {
+    // If we have local tracks, wait for negotiationneeded event first
+    // This ensures tracks are properly included in the offer
+    if (this.#localTracks.length > 0 && connection.signalingState === 'stable') {
+      await new Promise((resolve) => {
+        connection.addEventListener('negotiationneeded', resolve, { once: true });
+      });
+    }
+
     const offerInit = await connection.createOffer();
     await connection.setLocalDescription(offerInit);
     await waitIceComplete(connection);

@@ -319,7 +319,7 @@ describe("PeerMesh", function () {
     assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
   });
 
-  it("should exchange video tracks between two peers", async function () {
+  it("should exchange video tracks between two peers (both start camera before connect)", async function () {
     const { send: sendOffer, recv: recvOffer } = barrierMsg();
     const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
 
@@ -357,6 +357,136 @@ describe("PeerMesh", function () {
       await sendAnswer(answerToken);
 
       await peers.recv(); // wait for A to connect
+
+      // Should receive remote stream from A
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-a");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    await Promise.all([a(), b()]);
+  });
+
+  it("should handle A starting camera after connection (renegotiation)", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+
+      // Connect WITHOUT camera
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+      await peers.recv(); // wait for B to connect
+
+      // NOW start camera (should trigger renegotiation)
+      const tracksA = createFakeTracks();
+      mesh.addLocalTracks(tracksA);
+
+      // Wait a bit for renegotiation to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+    };
+
+    const b = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+
+      // Connect WITHOUT camera
+      const offerLink = await recvOffer();
+      const answerToken = await mesh.acceptInvite(offerLink, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+      await peers.recv(); // wait for A to connect
+
+      // Should receive remote stream from A after renegotiation
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-a");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    await Promise.all([a(), b()]);
+  });
+
+  it("should handle B starting camera after connection (renegotiation)", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+
+      // Connect WITHOUT camera
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+      await peers.recv(); // wait for B to connect
+
+      // Should receive remote stream from B after renegotiation
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-b");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    const b = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+
+      // Connect WITHOUT camera
+      const offerLink = await recvOffer();
+      const answerToken = await mesh.acceptInvite(offerLink, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+      await peers.recv(); // wait for A to connect
+
+      // NOW start camera (should trigger renegotiation)
+      const tracksB = createFakeTracks();
+      mesh.addLocalTracks(tracksB);
+
+      // Wait a bit for renegotiation to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+    };
+
+    await Promise.all([a(), b()]);
+  });
+
+  it("should handle both peers starting camera after connection", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+
+      // Connect WITHOUT camera
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+      await peers.recv(); // wait for B to connect
+
+      // Start camera
+      const tracksA = createFakeTracks();
+      mesh.addLocalTracks(tracksA);
+
+      // Should receive remote stream from B
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-b");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    const b = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+
+      // Connect WITHOUT camera
+      const offerLink = await recvOffer();
+      const answerToken = await mesh.acceptInvite(offerLink, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+      await peers.recv(); // wait for A to connect
+
+      // Start camera
+      const tracksB = createFakeTracks();
+      mesh.addLocalTracks(tracksB);
 
       // Should receive remote stream from A
       const { peerId, stream } = await remoteStreams.recv();

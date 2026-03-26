@@ -89,7 +89,14 @@ export class AppState {
 
   /** @param {ConnectedPeer} peer */
   #onPeerConnected(peer) {
-    this.peers.set(peer.id, { id: peer.id, name: peer.name, stream: null });
+    // Check if peer already exists (might have been created by setPeerStream due to race condition)
+    const existingPeer = this.peers.get(peer.id);
+    if (existingPeer) {
+      // Update name but keep existing stream
+      existingPeer.name = peer.name;
+    } else {
+      this.peers.set(peer.id, { id: peer.id, name: peer.name, stream: null });
+    }
     scheduleRender();
   }
 
@@ -256,11 +263,14 @@ export class AppState {
    * @param {MediaStream} stream
    */
   setPeerStream(peerId, stream) {
-    const peer = this.peers.get(peerId);
-    if (peer) {
-      peer.stream = stream;
-      scheduleRender();
+    let peer = this.peers.get(peerId);
+    if (!peer) {
+      // Peer not yet registered - create placeholder entry (race condition with onPeerConnected)
+      peer = { id: peerId, name: 'Connecting...', stream: null };
+      this.peers.set(peerId, peer);
     }
+    peer.stream = stream;
+    scheduleRender();
   }
 }
 
