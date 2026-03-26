@@ -87,6 +87,15 @@
       border-color: var(--border);
     }
   }
+
+  & video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: var(--card);
+  }
 }
 
 .peer-avatar {
@@ -113,6 +122,20 @@
   color: var(--muted-foreground);
   max-width: 100%;
   padding-inline: var(--space-2);
+  position: relative;
+  z-index: 1;
+  background: var(--card);
+  border-radius: var(--radius-small);
+  padding: var(--space-1) var(--space-2);
+}
+
+.peer-tile:has(video) .peer-name {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  color: white;
+  background: rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(4px);
 }
 
 .name-input {
@@ -129,6 +152,15 @@
     outline: none;
     border-bottom-color: var(--primary);
     color: var(--foreground);
+  }
+}
+
+.peer-tile:has(video) .name-input {
+  color: white;
+  border-bottom-color: rgba(255, 255, 255, 0.4);
+
+  &:focus {
+    border-bottom-color: var(--primary);
   }
 }
 

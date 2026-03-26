@@ -27,7 +27,9 @@ import { encodeToken, decodeToken } from './utils.js';
  * @typedef {{ type: 'PEER_LEFT' }} PeerLeftMessage
  * @typedef {{ type: 'CHAT', text: string, timestamp: number }} ChatMessage
  * @typedef {{ type: 'SCREEN_SHARE', active: boolean }} ScreenShareMessage
- * @typedef {PeerListMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage} MeshMessage
+ * @typedef {{ type: 'RENEGOTIATE_OFFER', sdp: string }} RenegotiateOfferMessage
+ * @typedef {{ type: 'RENEGOTIATE_ANSWER', sdp: string }} RenegotiateAnswerMessage
+ * @typedef {PeerListMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage | RenegotiateOfferMessage | RenegotiateAnswerMessage} MeshMessage
  */
 
 /**
@@ -35,6 +37,7 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(peer: ConnectedPeer) => void} onPeerConnected
  * @property {(peerId: string) => void} onPeerDisconnected
  * @property {(fromId: string, message: MeshMessage) => void} onMessage
+ * @property {(peerId: string, stream: MediaStream) => void} onRemoteStream
  */
 
 /**
@@ -74,6 +77,18 @@ export class PeerMesh {
   /** @type {MeshCallbacks} */
   #callbacks;
 
+  /** @type {MediaStreamTrack[]} */
+  #localTracks = [];
+
+  /** @type {WeakMap<RTCPeerConnection, string>} */
+  #connectionToPeerId = new WeakMap();
+
+  /**
+   * Track negotiation state per peer to implement perfect negotiation.
+   * @type {Map<string, { makingOffer: boolean, ignoreOffer: boolean }>}
+   */
+  #negotiationState = new Map();
+
   /** @param {MeshCallbacks} callbacks */
   constructor(callbacks) {
     this.#callbacks = callbacks;
@@ -89,7 +104,8 @@ export class PeerMesh {
     this.#myId = myId;
     this.#myName = myName;
 
-    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+    // Note: peerId not known yet, will be set when answer arrives
+    const connection = this.#createConnection('pending');
     const channel = connection.createDataChannel('mesh');
 
     const offer = await this.#gatherOffer(connection);
@@ -99,6 +115,9 @@ export class PeerMesh {
 
     const acceptAnswer = async (/** @type {string} */ input) => {
       const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
+      // Update the peer ID mapping BEFORE setting remote description
+      // so that any ontrack events get the correct peer ID
+      this.#connectionToPeerId.set(connection, answerData.peerId);
       await connection.setRemoteDescription(new RTCSessionDescription({ sdp: answerData.sdp, type: answerData.type }));
       await this.#waitChannelOpen(channel);
       this.#registerPeer(answerData.peerId, answerData.name, connection, channel, true);
@@ -120,7 +139,7 @@ export class PeerMesh {
     this.#myName = myName;
 
     const offerData = this.#parseToken(offerInput);
-    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+    const connection = this.#createConnection(offerData.peerId);
 
     /** @type {Promise<RTCDataChannel>} */
     const channelReady = new Promise((resolve) => {
@@ -158,7 +177,113 @@ export class PeerMesh {
     if (peer?.channel.readyState === 'open') peer.channel.send(JSON.stringify(message));
   }
 
+  /**
+   * Add local media tracks to all existing peer connections and store for future connections.
+   * This will trigger renegotiation for existing connections via the 'negotiationneeded' event.
+   * @param {MediaStreamTrack[]} tracks
+   */
+  addLocalTracks(tracks) {
+    this.#localTracks = tracks;
+
+    // Create a MediaStream from the tracks so they're properly grouped
+    const stream = new MediaStream(tracks);
+
+    // Add tracks to all existing peer connections with the stream
+    // This will automatically trigger 'negotiationneeded' event for each connection
+    for (const peer of this.#peers.values()) {
+      for (const track of tracks) {
+        peer.connection.addTrack(track, stream);
+      }
+    }
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Set up a new RTCPeerConnection with local tracks and remote stream handler.
+   * @param {string} peerId
+   * @returns {RTCPeerConnection}
+   */
+  #createConnection(peerId) {
+    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+
+    // Store mapping for later updates
+    this.#connectionToPeerId.set(connection, peerId);
+
+    // Initialize negotiation state
+    this.#negotiationState.set(peerId, { makingOffer: false, ignoreOffer: false });
+
+    // Add local tracks if available
+    if (this.#localTracks.length > 0) {
+      const stream = new MediaStream(this.#localTracks);
+      for (const track of this.#localTracks) {
+        connection.addTrack(track, stream);
+      }
+    }
+
+    // Handle incoming remote tracks
+    /** @type {Map<string, MediaStream>} */
+    const remoteStreams = new Map();
+
+    connection.addEventListener('track', (e) => {
+      const stream = e.streams[0];
+      // Always get the current peer ID from the mapping, not the closure
+      const currentPeerId = this.#connectionToPeerId.get(connection) ?? peerId;
+      if (stream && !remoteStreams.has(stream.id)) {
+        remoteStreams.set(stream.id, stream);
+        this.#callbacks.onRemoteStream(currentPeerId, stream);
+      }
+    });
+
+    // Handle negotiation needed (when tracks are added/removed dynamically)
+    connection.addEventListener('negotiationneeded', async () => {
+      const actualPeerId = this.#connectionToPeerId.get(connection) ?? peerId;
+      const peer = this.#peers.get(actualPeerId);
+      if (!peer) return; // Not registered yet, initial negotiation handles this
+
+      await this.#handleNegotiationNeeded(actualPeerId, peer);
+    });
+
+    return connection;
+  }
+
+  /**
+   * Handle negotiation needed event - send renegotiation offer to peer.
+   * Uses perfect negotiation pattern to avoid glare.
+   * @param {string} peerId
+   * @param {ConnectedPeer} peer
+   */
+  async #handleNegotiationNeeded(peerId, peer) {
+    const state = this.#negotiationState.get(peerId);
+    if (!state) return;
+
+    try {
+      state.makingOffer = true;
+
+      await peer.connection.setLocalDescription();
+      const offer = peer.connection.localDescription;
+      if (!offer) return;
+
+      this.send(peerId, {
+        type: 'RENEGOTIATE_OFFER',
+        sdp: offer.sdp ?? '',
+      });
+    } catch (err) {
+      console.error('PeerMesh: Failed to create renegotiation offer:', err);
+    } finally {
+      state.makingOffer = false;
+    }
+  }
+
+  /**
+   * Determine if this peer is "polite" in the perfect negotiation pattern.
+   * Polite peer yields during conflicts. Based on lexicographic peer ID comparison.
+   * @param {string} remotePeerId
+   * @returns {boolean}
+   */
+  #isPolite(remotePeerId) {
+    return this.#myId < remotePeerId;
+  }
 
   /**
    * @param {RTCPeerConnection} connection
@@ -217,6 +342,9 @@ export class PeerMesh {
    */
   #registerPeer(id, name, connection, channel, sendPeerList) {
     if (this.#peers.has(id)) return; // already connected (shouldn't happen, but guard it)
+
+    // Update the connection-to-peerId mapping with the actual peer ID
+    this.#connectionToPeerId.set(connection, id);
 
     /** @type {ConnectedPeer} */
     const peer = { id, name, connection, channel };
@@ -278,8 +406,68 @@ export class PeerMesh {
       } else {
         this.send(message.to, message);
       }
+    } else if (message.type === 'RENEGOTIATE_OFFER') {
+      this.#handleRenegotiateOffer(fromId, message).catch(err => console.error('PeerMesh: handleRenegotiateOffer failed', err));
+    } else if (message.type === 'RENEGOTIATE_ANSWER') {
+      this.#handleRenegotiateAnswer(fromId, message).catch(err => console.error('PeerMesh: handleRenegotiateAnswer failed', err));
     } else {
       this.#callbacks.onMessage(fromId, message);
+    }
+  }
+
+  /**
+   * Handle incoming renegotiation offer using perfect negotiation pattern.
+   * @param {string} fromId
+   * @param {RenegotiateOfferMessage} message
+   */
+  async #handleRenegotiateOffer(fromId, message) {
+    const peer = this.#peers.get(fromId);
+    if (!peer) return;
+
+    const state = this.#negotiationState.get(fromId);
+    if (!state) return;
+
+    const polite = this.#isPolite(fromId);
+    const offerCollision = state.makingOffer || peer.connection.signalingState !== 'stable';
+
+    state.ignoreOffer = !polite && offerCollision;
+    if (state.ignoreOffer) return;
+
+    try {
+      await peer.connection.setRemoteDescription({
+        type: 'offer',
+        sdp: message.sdp,
+      });
+
+      await peer.connection.setLocalDescription();
+      const answer = peer.connection.localDescription;
+      if (!answer) return;
+
+      this.send(fromId, {
+        type: 'RENEGOTIATE_ANSWER',
+        sdp: answer.sdp ?? '',
+      });
+    } catch (err) {
+      console.error('PeerMesh: Failed to handle renegotiation offer:', err);
+    }
+  }
+
+  /**
+   * Handle incoming renegotiation answer.
+   * @param {string} fromId
+   * @param {RenegotiateAnswerMessage} message
+   */
+  async #handleRenegotiateAnswer(fromId, message) {
+    const peer = this.#peers.get(fromId);
+    if (!peer) return;
+
+    try {
+      await peer.connection.setRemoteDescription({
+        type: 'answer',
+        sdp: message.sdp,
+      });
+    } catch (err) {
+      console.error('PeerMesh: Failed to handle renegotiation answer:', err);
     }
   }
 
@@ -288,7 +476,7 @@ export class PeerMesh {
    * @param {string} targetName
    */
   async #initiateRelayConnection(targetId, targetName) {
-    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+    const connection = this.#createConnection(targetId);
     const channel = connection.createDataChannel('mesh');
 
     const offer = await this.#gatherOffer(connection);
@@ -308,7 +496,7 @@ export class PeerMesh {
    * @param {string} viaId — peer that forwarded this relay offer to us
    */
   async #handleRelayOffer(message, viaId) {
-    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+    const connection = this.#createConnection(message.from);
 
     /** @type {Promise<RTCDataChannel>} */
     const channelReady = new Promise((resolve) => {

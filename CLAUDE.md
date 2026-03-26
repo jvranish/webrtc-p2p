@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Serverless peer-to-peer video conferencing (like Jitsi). No build step, no central server. Peers exchange SDP tokens manually (copy/paste or shareable links) to form a full-mesh network. Uses public STUN servers only.
+Serverless peer-to-peer video conferencing. No build step, no central server. Peers exchange SDP tokens manually (copy/paste or shareable links) to form a full-mesh network. Uses public STUN servers only.
 
 ## Commands
 

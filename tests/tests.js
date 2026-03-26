@@ -11,7 +11,8 @@ import { PeerMesh } from "../src/app/mesh.js";
  *   mesh: PeerMesh,
  *   messages: Queue<{fromId: string, message: any}>,
  *   peers: Queue<{id: string, name: string}>,
- *   disconnects: Queue<string>
+ *   disconnects: Queue<string>,
+ *   remoteStreams: Queue<{peerId: string, stream: MediaStream}>
  * }}
  */
 function createTestPeer(id, name) {
@@ -21,6 +22,8 @@ function createTestPeer(id, name) {
   const peers = new Queue();
   /** @type {Queue<string>} */
   const disconnects = new Queue();
+  /** @type {Queue<{peerId: string, stream: MediaStream}>} */
+  const remoteStreams = new Queue();
 
   const mesh = new PeerMesh({
     onPeerConnected: (peer) => {
@@ -32,9 +35,32 @@ function createTestPeer(id, name) {
     onMessage: (fromId, message) => {
       messages.push({ fromId, message });
     },
+    onRemoteStream: (peerId, stream) => {
+      remoteStreams.push({ peerId, stream });
+    },
   });
 
-  return { mesh, messages, peers, disconnects };
+  return { mesh, messages, peers, disconnects, remoteStreams };
+}
+
+/**
+ * Create fake media tracks for testing
+ * @returns {MediaStreamTrack[]}
+ */
+function createFakeTracks() {
+  // Create a canvas to generate a fake video track
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = 'blue';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // @ts-ignore - captureStream exists on HTMLCanvasElement
+  const stream = /** @type {MediaStream} */ (canvas.captureStream(1)); // 1 fps
+  return stream.getTracks();
 }
 
 describe("PeerMesh", function () {
@@ -291,5 +317,54 @@ describe("PeerMesh", function () {
     }
     assert(error instanceof Error, "Expected error for invalid base64");
     assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+  });
+
+  it("should exchange video tracks between two peers", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+
+      // Add fake local tracks BEFORE creating invite (like real getUserMedia flow)
+      const tracksA = createFakeTracks();
+      mesh.addLocalTracks(tracksA);
+
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+
+      await peers.recv(); // wait for B to connect
+
+      // Should receive remote stream from B
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-b");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    const b = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+
+      // Add fake local tracks BEFORE accepting invite (like real getUserMedia flow)
+      const tracksB = createFakeTracks();
+      mesh.addLocalTracks(tracksB);
+
+      const offerLink = await recvOffer();
+      const answerToken = await mesh.acceptInvite(offerLink, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+
+      await peers.recv(); // wait for A to connect
+
+      // Should receive remote stream from A
+      const { peerId, stream } = await remoteStreams.recv();
+      assertEq(peerId, "peer-a");
+      assert(stream instanceof MediaStream, "Expected MediaStream");
+      assert(stream.getTracks().length > 0, "Expected stream to have tracks");
+    };
+
+    await Promise.all([a(), b()]);
   });
 });

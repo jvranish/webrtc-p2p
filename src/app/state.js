@@ -16,6 +16,7 @@ import { PeerMesh } from './mesh.js';
  * @typedef {Object} PeerEntry
  * @property {string} id
  * @property {string} name
+ * @property {MediaStream | null} stream
  */
 
 /** @type {(() => void) | null} */
@@ -52,6 +53,12 @@ export class AppState {
   /** @type {string | null} */
   pinnedPeerId = null;
 
+  /** @type {MediaStream | null} */
+  localStream = null;
+
+  audioEnabled = true;
+  videoEnabled = true;
+
   /** @type {'idle' | 'offering' | 'waiting-answer'} */
   invitePhase = 'idle';
 
@@ -77,11 +84,12 @@ export class AppState {
     onPeerConnected: (peer) => this.#onPeerConnected(peer),
     onPeerDisconnected: (id) => this.#onPeerDisconnected(id),
     onMessage: (fromId, msg) => this.#onMessage(fromId, msg),
+    onRemoteStream: (peerId, stream) => this.setPeerStream(peerId, stream),
   });
 
   /** @param {ConnectedPeer} peer */
   #onPeerConnected(peer) {
-    this.peers.set(peer.id, { id: peer.id, name: peer.name });
+    this.peers.set(peer.id, { id: peer.id, name: peer.name, stream: null });
     scheduleRender();
   }
 
@@ -204,6 +212,55 @@ export class AppState {
   /** @param {string | null} peerId */
   setPinnedPeer(peerId) {
     this.pinnedPeerId = peerId === this.pinnedPeerId ? null : peerId;
+  }
+
+  async startMedia() {
+    if (this.localStream) return; // already started
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      this.localStream = stream;
+
+      // Pass local tracks to mesh for all existing connections
+      this.#mesh.addLocalTracks(stream.getTracks());
+
+      scheduleRender();
+    } catch (err) {
+      console.error('Failed to get user media:', err);
+      throw err;
+    }
+  }
+
+  toggleAudio() {
+    if (!this.localStream) return;
+    this.audioEnabled = !this.audioEnabled;
+    const audioTracks = this.localStream.getAudioTracks();
+    for (const track of audioTracks) {
+      track.enabled = this.audioEnabled;
+    }
+  }
+
+  toggleVideo() {
+    if (!this.localStream) return;
+    this.videoEnabled = !this.videoEnabled;
+    const videoTracks = this.localStream.getVideoTracks();
+    for (const track of videoTracks) {
+      track.enabled = this.videoEnabled;
+    }
+  }
+
+  /**
+   * @param {string} peerId
+   * @param {MediaStream} stream
+   */
+  setPeerStream(peerId, stream) {
+    const peer = this.peers.get(peerId);
+    if (peer) {
+      peer.stream = stream;
+      scheduleRender();
+    }
   }
 }
 
