@@ -103,6 +103,12 @@ export class AppState {
     } else {
       this.peers.set(peer.id, { id: peer.id, name: peer.name, stream: null });
     }
+
+    // Auto-close join modal when first peer connects
+    if (this.joinPhase === 'showing-answer') {
+      this.closeJoinModal();
+    }
+
     scheduleRender();
   }
 
