@@ -16,9 +16,20 @@ npx http-server -p 5500
 
 # Type check
 npx --package typescript tsc --noEmit -p ./jsconfig.json
+
+# Run tests (requires server running on port 5501)
+web-tester http://localhost:5501/tests.html
 ```
 
 Open `http://localhost:5500` for the app.
+
+## Testing
+
+Tests are in `tests/` directory and run in the browser via `tests.html`. The test infrastructure includes:
+- `test-helpers.js` - Test framework (`describe`, `it`, assertions, barriers)
+- `test-runner.js` - Runs tests and displays results
+- `utils/queue.js` - Async queue for coordinating test messages
+- `tests.js` - Mesh connection tests covering full join flow and message exchange
 
 ## Architecture
 

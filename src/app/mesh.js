@@ -98,7 +98,7 @@ export class PeerMesh {
     const offerLink = `${location.href.split('#')[0]}#offer=${encodeToken(tokenData)}`;
 
     const acceptAnswer = async (/** @type {string} */ input) => {
-      const answerData = this.#parseToken(input);
+      const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
       await connection.setRemoteDescription(new RTCSessionDescription({ sdp: answerData.sdp, type: answerData.type }));
       await this.#waitChannelOpen(channel);
       this.#registerPeer(answerData.peerId, answerData.name, connection, channel, true);

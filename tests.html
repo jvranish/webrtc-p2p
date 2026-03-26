@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:," />
+  <title>Tests</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "scaffold-html": "./src/deps/scaffold-html/index.js",
+      "webrtc-mini": "./src/deps/webrtc/webrtc.js"
+    }
+  }
+  </script>
+  <script type="module">
+    import { runTests } from "./tests/test-runner.js";
+    import "./tests/tests.js";
+
+    runTests();
+
+  </script>
+</head>
+
+<body>
+  Tests
+</body>
+
+</html>
