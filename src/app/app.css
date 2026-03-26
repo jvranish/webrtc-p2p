@@ -1,0 +1,407 @@
+/* ── Layout ────────────────────────────────────────────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.tiles-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Grid layout ───────────────────────────────────────────────────────── */
+
+.tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2);
+  height: 100%;
+  overflow-y: auto;
+  align-content: start;
+}
+
+/* ── Pinned layout ─────────────────────────────────────────────────────── */
+
+.tiles-pinned {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  height: 100%;
+}
+
+.tile-main {
+  flex: 1;
+  min-width: 0;
+
+  & .peer-tile {
+    height: 100%;
+    aspect-ratio: unset;
+  }
+}
+
+.tile-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 180px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+/* ── Peer tile ─────────────────────────────────────────────────────────── */
+
+.peer-tile {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-medium);
+  aspect-ratio: 16 / 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+
+  &:hover {
+    border-color: var(--primary);
+  }
+
+  &.peer-tile--pinned {
+    border-color: var(--primary);
+  }
+
+  &.peer-tile--self {
+    cursor: default;
+
+    &:hover {
+      border-color: var(--border);
+    }
+  }
+}
+
+.peer-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-3);
+  font-weight: var(--font-semibold);
+  flex-shrink: 0;
+
+  &.peer-avatar--self {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+.peer-name {
+  font-size: var(--text-7);
+  color: var(--muted-foreground);
+  max-width: 100%;
+  padding-inline: var(--space-2);
+}
+
+.name-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--border);
+  text-align: center;
+  font-size: var(--text-7);
+  color: var(--muted-foreground);
+  width: 120px;
+  padding: var(--space-1);
+
+  &:focus {
+    outline: none;
+    border-bottom-color: var(--primary);
+    color: var(--foreground);
+  }
+}
+
+.self-label {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+  background: var(--card);
+  border-radius: var(--radius-small);
+  padding: 1px var(--space-1);
+}
+
+.pin-badge {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  font-size: var(--text-7);
+}
+
+/* ── Empty / solo state ────────────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-4);
+}
+
+.empty-state-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 400px;
+
+  & .peer-tile {
+    width: 100%;
+    max-width: 280px;
+    cursor: default;
+  }
+}
+
+.empty-hint {
+  color: var(--muted-foreground);
+  text-align: center;
+  margin: 0;
+}
+
+.join-input-row {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+
+  & input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* ── Toolbar ───────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
+
+  & button.active {
+    background: var(--secondary);
+  }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--text-8);
+  font-weight: var(--font-semibold);
+  border-radius: var(--radius-full);
+  min-width: 1.2em;
+  height: 1.2em;
+  padding-inline: 0.3em;
+  margin-left: var(--space-1);
+  vertical-align: middle;
+}
+
+/* ── Chat panel ────────────────────────────────────────────────────────── */
+
+.chat-panel {
+  position: fixed;
+  inset-block: 0;
+  right: 0;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  z-index: 10;
+  box-shadow: var(--shadow-large);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-weight: var(--font-semibold);
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  padding: var(--space-1);
+  cursor: pointer;
+  color: var(--muted-foreground);
+  line-height: 1;
+
+  &:hover {
+    color: var(--foreground);
+  }
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chat-empty {
+  color: var(--muted-foreground);
+  text-align: center;
+  font-size: var(--text-7);
+}
+
+.chat-message {
+  & .chat-from {
+    font-size: var(--text-8);
+    font-weight: var(--font-semibold);
+    color: var(--muted-foreground);
+    margin-bottom: 2px;
+  }
+
+  & .chat-text {
+    word-break: break-word;
+    font-size: var(--text-7);
+  }
+}
+
+.chat-input-row {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
+
+  & input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* ── Modals ────────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-large);
+  width: min(100% - 2rem, 32rem);
+  max-height: 85dvh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+
+  & > header {
+    padding: var(--space-6);
+    padding-block-end: 0;
+
+    & h2 {
+      margin-block-start: 0;
+      margin-block-end: var(--space-1);
+    }
+
+    & p {
+      color: var(--muted-foreground);
+      font-size: var(--text-7);
+      margin: 0;
+    }
+  }
+
+  & > div {
+    padding: var(--space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  & > footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-6);
+    padding-block-start: 0;
+  }
+}
+
+.field-label {
+  display: block;
+  font-size: var(--text-7);
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--space-1);
+}
+
+.copy-row {
+  display: flex;
+  gap: var(--space-2);
+
+  & input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-8);
+  }
+}
+
+.hint {
+  font-size: var(--text-7);
+  color: var(--muted-foreground);
+  margin: 0;
+}
+
+.error-msg {
+  font-size: var(--text-7);
+  color: var(--danger);
+  margin: 0;
+}
+
+/* ── Spinner (oat utility) ─────────────────────────────────────────────── */
+
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: var(--radius-full);
+  animation: spin 0.7s linear infinite;
+  margin: var(--space-4) auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -1,0 +1,53 @@
+@layer components {
+  [role="alert"] {
+    position: relative;
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-6);
+    background-color: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-medium);
+    font-size: var(--text-7);
+
+    &[data-variant] {
+      border: none;
+    }
+
+    &[data-variant="error"],
+    &[data-variant="danger"] {
+      color: var(--danger);
+      background-color: light-dark(
+        color-mix(in srgb, var(--danger) 8%, transparent),
+        color-mix(in srgb, var(--danger) 20%, transparent)
+      );
+
+      & a {
+        color: var(--danger);
+      }
+    }
+
+    &[data-variant="success"] {
+      color: var(--success);
+      background-color: light-dark(
+        color-mix(in srgb, var(--success) 8%, transparent),
+        color-mix(in srgb, var(--success) 20%, transparent)
+      );
+
+      & a {
+        color: var(--success);
+      }
+    }
+
+    &[data-variant="warning"] {
+      color: var(--warning);
+      background-color: light-dark(
+        color-mix(in srgb, var(--warning) 8%, transparent),
+        color-mix(in srgb, var(--warning) 20%, transparent)
+      );
+
+      & a {
+        color: var(--warning);
+      }
+    }
+  }
+}

@@ -1,0 +1,191 @@
+@layer components {
+  :root {
+    --_nh: var(--space-12);
+  }
+
+  [data-sidebar-layout] {
+    --topnav-offset: 0px;
+    --topnav-scroll-offset: 0px;
+
+    display: grid;
+    grid-template-columns: 14rem 1fr;
+    min-height: 100dvh;
+    gap: var(--space-4);
+
+    &:has(nav[data-topnav]) {
+      --topnav-offset: var(--_nh);
+      --topnav-scroll-offset: calc(var(--_nh) + var(--space-6));
+    }
+
+    > main {
+      min-width: 0;
+      margin-block-start: var(--topnav-offset);
+
+      [id] {
+        scroll-margin-block-start: var(--topnav-scroll-offset);
+      }
+    }
+
+    > aside[data-sidebar] {
+      position: sticky;
+      top: var(--topnav-offset);
+      z-index: 1;
+      height: calc(100dvh - var(--topnav-offset));
+      align-self: start;
+      background-color: var(--background);
+      border-inline-end: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+
+      > :is(header, footer) {
+        flex-shrink: 0;
+        padding: var(--space-3);
+      }
+
+      > footer {
+        margin-block-start: auto;
+      }
+
+      > nav {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--space-3) var(--space-2);
+
+        ul {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-1);
+
+          li {
+            margin: 0;
+          }
+        }
+
+        a {
+          display: flex;
+          gap: var(--space-2);
+          padding: var(--space-1) var(--space-3);
+          font-size: var(--text-7);
+          color: var(--foreground);
+          text-decoration: none;
+          border-radius: var(--radius-small);
+          transition: background-color var(--transition-fast);
+
+          &:is(:hover, [aria-current]) {
+            background-color: var(--accent);
+          }
+        }
+
+        details {
+          border: none;
+          overflow: visible;
+
+          & + details { margin-top: 0; }
+          &[open] summary { border-bottom: none; }
+          > ul { margin-inline-start: var(--space-4); padding: var(--space-1) 0; }
+        }
+
+        summary {
+          justify-content: flex-start;
+          padding: var(--space-2) var(--space-3);
+          font-size: var(--text-7);
+          border-radius: var(--radius-small);
+
+          &::after {
+            width: 0.75rem;
+            height: 0.75rem;
+            margin-inline-start: auto;
+          }
+        }
+      }
+    }
+  }
+
+  nav[data-topnav] {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 5;
+    min-height: var(--_nh);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    background-color: var(--background);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-small);
+  }
+
+  :is([data-sidebar-toggle], [data-sidebar-header]) {
+    display: none;
+  }
+
+  [data-sidebar-toggle] {
+    padding: 0 var(--space-1);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    cursor: pointer;
+  }
+
+  @media (min-width: 769px) {
+    [data-sidebar-layout="always"] [data-sidebar-toggle] {
+      display: inline-block;
+    }
+
+    [data-sidebar-layout="always"] {
+      transition: grid-template-columns var(--transition);
+
+      > aside[data-sidebar] {
+        transform: translateX(0);
+        opacity: 1;
+        transition: transform var(--transition), opacity var(--transition), visibility var(--transition);
+      }
+    }
+
+    [data-sidebar-layout="always"][data-sidebar-open] {
+      grid-template-columns: 0px 1fr;
+      gap: 0;
+
+      > aside[data-sidebar] {
+        overflow: hidden;
+        min-width: 0;
+        transform: translateX(-100%);
+        opacity: 0;
+        visibility: hidden;
+        border-inline-end: none;
+      }
+    }
+  }
+
+  @media (max-width: 768px) {
+    [data-sidebar-layout] {
+      grid-template-columns: 1fr;
+
+      > aside[data-sidebar] {
+        position: fixed;
+        left: 0;
+        width: 16rem;
+        transform: translateX(-100%);
+        transition: transform var(--transition);
+        box-shadow: var(--shadow-large);
+      }
+
+      &[data-sidebar-open] > aside[data-sidebar] {
+        transform: translateX(0);
+      }
+    }
+    [data-sidebar-toggle] { display: inline-block; }
+
+    [data-sidebar-header] {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--border);
+    }
+  }
+}

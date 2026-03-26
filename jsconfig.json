@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "allowImportingTsExtensions": true,
+    "module": "es2022",
+    "target": "es2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "paths": {
+      "scaffold-html": ["./src/deps/scaffold-html/index.js"],
+      "webrtc": ["./src/deps/webrtc/webrtc.js"],
+    }
+  },
+  "include": [
+    "src/**/*.js",
+    "src/**/*.mjs",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": [
+  ]
+}

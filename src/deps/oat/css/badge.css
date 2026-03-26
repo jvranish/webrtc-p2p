@@ -1,0 +1,49 @@
+@layer components {
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-4);
+    font-size: var(--text-8);
+    font-weight: var(--font-medium);
+    line-height: var(--leading-normal);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    border-radius: var(--radius-full);
+
+    &.secondary {
+      background-color: var(--secondary);
+      color: var(--secondary-foreground);
+    }
+
+    &.outline {
+      background-color: transparent;
+      color: var(--foreground);
+      border: 1px solid var(--border);
+    }
+
+    &.success {
+      color: var(--success);
+      background-color: light-dark(
+        color-mix(in srgb, var(--success) 10%, transparent),
+        color-mix(in srgb, var(--success) 30%, transparent)
+      );
+    }
+
+    &.warning {
+      color: var(--warning);
+      background-color: light-dark(
+        color-mix(in srgb, var(--warning) 10%, transparent),
+        color-mix(in srgb, var(--warning) 30%, transparent)
+      );
+    }
+
+    &.danger {
+      color: var(--danger);
+      background-color: light-dark(
+        color-mix(in srgb, var(--danger) 10%, transparent),
+        color-mix(in srgb, var(--danger) 30%, transparent)
+      );
+    }
+  }
+}
