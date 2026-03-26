@@ -29,7 +29,21 @@ export function encodeToken(obj) {
  * @returns {unknown}
  */
 export function decodeToken(encoded) {
-  return JSON.parse(atob(encoded));
+  if (!encoded || !encoded.trim()) {
+    throw new Error('Invalid token: empty or whitespace-only');
+  }
+  try {
+    const decoded = atob(encoded.trim());
+    if (!decoded) {
+      throw new Error('Invalid token: decodes to empty string');
+    }
+    return JSON.parse(decoded);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Invalid token')) {
+      throw err;
+    }
+    throw new Error('Invalid token: unable to decode');
+  }
 }
 
 /**

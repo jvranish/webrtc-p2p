@@ -1,6 +1,6 @@
 // @ts-check
 import { Queue } from "./utils/queue.js";
-import { assertEq, assertDeepEq, barrierMsg, describe, it } from "./test-helpers.js";
+import { assert, assertEq, assertDeepEq, barrierMsg, describe, it } from "./test-helpers.js";
 import { PeerMesh } from "../src/app/mesh.js";
 
 /**
@@ -254,5 +254,42 @@ describe("PeerMesh", function () {
     };
 
     await Promise.all([a(), b(), c()]);
+  });
+
+  it("should handle invalid answer token gracefully", async function () {
+    const { mesh } = createTestPeer("peer-a", "Alice");
+
+    // Create an invite
+    const { acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+
+    // Try to accept with empty string
+    let error = null;
+    try {
+      await acceptAnswer("");
+    } catch (err) {
+      error = err;
+    }
+    assert(error instanceof Error, "Expected error for empty token");
+    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+
+    // Try to accept with whitespace only
+    error = null;
+    try {
+      await acceptAnswer("   \n\t  ");
+    } catch (err) {
+      error = err;
+    }
+    assert(error instanceof Error, "Expected error for whitespace-only token");
+    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+
+    // Try to accept with invalid base64
+    error = null;
+    try {
+      await acceptAnswer("not-valid-base64!!!");
+    } catch (err) {
+      error = err;
+    }
+    assert(error instanceof Error, "Expected error for invalid base64");
+    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
   });
 });
