@@ -1,6 +1,5 @@
 // @ts-check
 
-import { defaultIceServers } from 'webrtc-mini';
 import { encodeToken, decodeToken } from './utils.js';
 
 /**
@@ -40,6 +39,13 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(peerId: string, stream: MediaStream) => void} onRemoteStream
  * @property {(peerId: string, active: boolean) => void} onScreenShare
  */
+
+
+export const defaultIceServers = [
+  {
+    urls: "stun:stun.l.google.com:19302",
+  },
+];
 
 /**
  * Wait for ICE gathering to reach the 'complete' state.

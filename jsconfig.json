@@ -20,8 +20,7 @@
     "target": "es2024",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "paths": {
-      "scaffold-html": ["./src/deps/scaffold-html/index.js"],
-      "webrtc-mini": ["./src/deps/webrtc/webrtc.js"],
+      "scaffold-html": ["./src/deps/scaffold-html/index.js"]
     }
   },
   "include": [
