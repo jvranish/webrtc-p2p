@@ -21,7 +21,7 @@
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "paths": {
       "scaffold-html": ["./src/deps/scaffold-html/index.js"],
-      "webrtc": ["./src/deps/webrtc/webrtc.js"],
+      "webrtc-mini": ["./src/deps/webrtc/webrtc.js"],
     }
   },
   "include": [

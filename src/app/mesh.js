@@ -1,6 +1,6 @@
 // @ts-check
 
-import { defaultIceServers } from 'webrtc';
+import { defaultIceServers } from 'webrtc-mini';
 import { encodeToken, decodeToken } from './utils.js';
 
 /**

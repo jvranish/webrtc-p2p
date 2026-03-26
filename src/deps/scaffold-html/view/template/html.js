@@ -27,6 +27,13 @@ import {
 /** @type {(value: unknown) => value is { [name: string]: unknown } | null} */
 const isObject = (value) => typeof value === "object";
 
+// HTML void elements that cannot have children or closing tags
+// https://html.spec.whatwg.org/multipage/syntax.html#void-elements
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr'
+]);
+
 // Tag names must be only alphanumeric characters
 // (I'm unsure if they are allowed to start with a number, but that seems dumb)
 const tagName = token(regex(/^[a-zA-Z][a-zA-Z0-9\-]*/, "tag name"));
@@ -151,6 +158,7 @@ const tag = (state) => {
   regex(/^<(?!\/)/, "tag start")(state);
   const name = tagName(state);
   const attrs = attributes(state);
+  const isVoid = VOID_ELEMENTS.has(name.toLowerCase());
   const childNodes = any(
     (state) => {
       strToken("/>")(state);
@@ -158,6 +166,10 @@ const tag = (state) => {
     },
     (state) => {
       strToken(">")(state);
+      // Void elements cannot have children or closing tags
+      if (isVoid) {
+        return [];
+      }
       const c = elements(state);
       // strToken(`</${name}>`)(state);
       strToken(`</${name}`)(state);
