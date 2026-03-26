@@ -240,6 +240,38 @@ export class PeerMesh {
     }
   }
 
+  /**
+   * Replace the audio track in all peer connections (for device switching).
+   * @param {MediaStreamTrack | null} newTrack - New audio track, or null to remove audio
+   * @returns {Promise<void>}
+   */
+  async replaceAudioTrack(newTrack) {
+    for (const peer of this.#peers.values()) {
+      const senders = peer.connection.getSenders();
+      const audioSender = senders.find(s => s.track?.kind === 'audio');
+
+      if (audioSender) {
+        // Replace existing audio track
+        await audioSender.replaceTrack(newTrack);
+      } else if (newTrack) {
+        // No audio sender exists yet, add the track
+        // Create a stream for the track
+        const stream = new MediaStream([newTrack]);
+        peer.connection.addTrack(newTrack, stream);
+      }
+    }
+
+    // Update stored local tracks
+    if (newTrack) {
+      // Remove old audio track and add new one
+      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
+      this.#localTracks.push(newTrack);
+    } else {
+      // Remove audio track
+      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
+    }
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /**

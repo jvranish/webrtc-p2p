@@ -6,6 +6,7 @@ import { cast } from '../utils.js';
 import { ChatPanel } from './chat-panel.js';
 import { InviteModal } from './invite-modal.js';
 import { JoinModal, JoinButton } from './join-modal.js';
+import { SettingsPanel } from './settings-panel.js';
 
 /** @import {AppState, PeerEntry} from '../state.js' */
 
@@ -157,6 +158,11 @@ const Toolbar = (state) => html`
       class=${state.chatOpen ? 'active' : ''}
       onclick=${() => dispatch('toggleChat')}
     >Chat ${state.messages.length > 0 ? html`<span class="badge">${state.messages.length}</span>` : ''}</button>
+    <button
+      class=${state.settingsOpen ? 'active' : ''}
+      onclick=${() => dispatch('toggleSettings')}
+      title="Settings"
+    >⚙️</button>
   </div>
 `;
 
@@ -175,6 +181,7 @@ export const App = (state) => {
       ${state.chatOpen ? ChatPanel(state) : ''}
       ${InviteModal(state)}
       ${JoinModal(state)}
+      ${SettingsPanel(state)}
     </div>
   `;
 };

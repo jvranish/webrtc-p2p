@@ -64,6 +64,20 @@ export class AppState {
   /** @type {MediaStream | null} */
   screenStream = null;
 
+  /** @type {MediaDeviceInfo[]} */
+  audioDevices = [];
+
+  /** @type {MediaDeviceInfo[]} */
+  videoDevices = [];
+
+  /** @type {string | null} */
+  selectedAudioDeviceId = null;
+
+  /** @type {string | null} */
+  selectedVideoDeviceId = null;
+
+  settingsOpen = false;
+
   /** @type {'idle' | 'offering' | 'waiting-answer'} */
   invitePhase = 'idle';
 
@@ -245,14 +259,43 @@ export class AppState {
     this.pinnedPeerId = peerId === this.pinnedPeerId ? null : peerId;
   }
 
+  async enumerateDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      this.audioDevices = devices.filter(d => d.kind === 'audioinput');
+      this.videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+      // Set default selections if not already set
+      if (!this.selectedAudioDeviceId && this.audioDevices.length > 0) {
+        this.selectedAudioDeviceId = this.audioDevices[0].deviceId;
+      }
+      if (!this.selectedVideoDeviceId && this.videoDevices.length > 0) {
+        this.selectedVideoDeviceId = this.videoDevices[0].deviceId;
+      }
+
+      scheduleRender();
+    } catch (err) {
+      console.error('Failed to enumerate devices:', err);
+    }
+  }
+
   async startMedia() {
     if (this.localStream) return; // already started
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+      const constraints = {
+        video: this.selectedVideoDeviceId
+          ? { deviceId: { exact: this.selectedVideoDeviceId } }
+          : true,
+        audio: this.selectedAudioDeviceId
+          ? { deviceId: { exact: this.selectedAudioDeviceId } }
+          : true,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       this.localStream = stream;
+
+      // Enumerate devices AFTER getting permissions to get proper labels
+      await this.enumerateDevices();
 
       // Pass local tracks to mesh for all existing connections
       this.#mesh.addLocalTracks(stream.getTracks());
@@ -350,6 +393,84 @@ export class AppState {
     this.#mesh.broadcast({ type: 'SCREEN_SHARE', active: false });
 
     scheduleRender();
+  }
+
+  toggleSettings() {
+    this.settingsOpen = !this.settingsOpen;
+    if (this.settingsOpen && this.localStream) {
+      // Re-enumerate devices when opening settings to get latest labels
+      this.enumerateDevices();
+    }
+  }
+
+  /** @param {string} deviceId */
+  async switchAudioDevice(deviceId) {
+    if (!this.localStream) return;
+    this.selectedAudioDeviceId = deviceId;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: deviceId } },
+      });
+
+      const newAudioTrack = stream.getAudioTracks()[0];
+      if (!newAudioTrack) return;
+
+      // Apply current enabled state
+      newAudioTrack.enabled = this.audioEnabled;
+
+      // Stop old audio track
+      const oldAudioTrack = this.localStream.getAudioTracks()[0];
+      if (oldAudioTrack) {
+        oldAudioTrack.stop();
+        this.localStream.removeTrack(oldAudioTrack);
+      }
+
+      // Add new audio track to local stream
+      this.localStream.addTrack(newAudioTrack);
+
+      // Replace track in all peer connections
+      await this.#mesh.replaceAudioTrack(newAudioTrack);
+
+      scheduleRender();
+    } catch (err) {
+      console.error('Failed to switch audio device:', err);
+    }
+  }
+
+  /** @param {string} deviceId */
+  async switchVideoDevice(deviceId) {
+    if (!this.localStream || this.screenShareActive) return;
+    this.selectedVideoDeviceId = deviceId;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId } },
+      });
+
+      const newVideoTrack = stream.getVideoTracks()[0];
+      if (!newVideoTrack) return;
+
+      // Apply current enabled state
+      newVideoTrack.enabled = this.videoEnabled;
+
+      // Stop old video track
+      const oldVideoTrack = this.localStream.getVideoTracks()[0];
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+        this.localStream.removeTrack(oldVideoTrack);
+      }
+
+      // Add new video track to local stream
+      this.localStream.addTrack(newVideoTrack);
+
+      // Replace track in all peer connections
+      await this.#mesh.replaceVideoTrack(newVideoTrack);
+
+      scheduleRender();
+    } catch (err) {
+      console.error('Failed to switch video device:', err);
+    }
   }
 
   /**

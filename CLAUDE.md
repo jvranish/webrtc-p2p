@@ -10,9 +10,9 @@ Serverless peer-to-peer video conferencing. No build step, no central server. Pe
 
 ```bash
 # Serve locally (any static server from repo root)
-python -m http.server 5500
+python -m http.server 5501
 # or
-npx http-server -p 5500
+npx http-server -p 5501
 
 # Type check
 npx --package typescript tsc --noEmit -p ./jsconfig.json
@@ -21,7 +21,7 @@ npx --package typescript tsc --noEmit -p ./jsconfig.json
 web-tester http://localhost:5501/tests.html
 ```
 
-Open `http://localhost:5500` for the app.
+Open `http://localhost:5501` for the app.
 
 ## Testing
 
