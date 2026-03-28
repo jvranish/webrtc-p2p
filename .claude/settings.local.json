@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(npx --package typescript tsc:*)",
-      "Bash(web-tester:*)"
+      "Bash(npx run-page:*)"
     ],
     "deny": [],
     "ask": []

@@ -18,7 +18,7 @@ npx http-server -p 5501
 npx --package typescript tsc --noEmit -p ./jsconfig.json
 
 # Run tests (requires server running on port 5501)
-web-tester http://localhost:5501/tests.html
+npx run-page http://localhost:5501/tests.html
 ```
 
 Open `http://localhost:5501` for the app.
@@ -40,7 +40,6 @@ Pure ES modules served directly. Import aliases are configured in two places tha
 
 ### Key Libraries (vendored in `src/deps/`)
 - **`scaffold-html`** — reactive UI via tagged template literals. Import as `"scaffold-html"`. See `src/deps/scaffold-html/README.md` and `COMPONENTS.md`.
-- **`webrtc`** — low-level WebRTC helpers (`startOffer`/`answerOffer`). Import as `"webrtc"`. The app's mesh logic in `src/app/mesh.js` builds on this.
 - **`oat`** — CSS component library. Include `src/deps/oat/css/oat.css` and `src/deps/oat/js/index.js`. See CSS variables in `src/deps/oat/css/01-theme.css`.
 
 ### App Structure (`src/app/`)

@@ -68,7 +68,7 @@ python -m http.server 5501
 npx http-server -p 5501
 
 # Terminal 2: Run tests
-web-tester http://localhost:5501/tests.html
+npx run-page http://localhost:5501/tests.html
 ```
 
 ### Project Structure
