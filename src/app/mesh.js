@@ -251,7 +251,6 @@ export class PeerMesh {
       onRenegotiateAnswer: (sdp) => {
         this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_ANSWER', sdp });
       },
-      isPolite: this.#myId < peerId,
     });
 
     // Store the reference so we can update it later

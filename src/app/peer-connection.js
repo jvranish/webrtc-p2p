@@ -11,7 +11,6 @@
  * @property {() => void} [onDataChannelClosed] - Called when the data channel is closed
  * @property {(sdp: string) => void} [onRenegotiateOffer] - Called when a renegotiation offer needs to be sent to the remote peer
  * @property {(sdp: string) => void} [onRenegotiateAnswer] - Called when a renegotiation answer needs to be sent to the remote peer
- * @property {boolean} [isPolite] - Whether this peer is "polite" in the perfect negotiation pattern
  */
 
 export const defaultIceServers = [
@@ -53,6 +52,9 @@ export class PeerConnection {
 
   /** @type {{ makingOffer: boolean, ignoreOffer: boolean }} */
   #negotiationState = { makingOffer: false, ignoreOffer: false };
+
+  /** @type {boolean} */
+  #isPolite = false;
 
   /** @type {boolean} */
   #isConnected = false;
@@ -277,7 +279,7 @@ export class PeerConnection {
     const offerCollision = this.#negotiationState.makingOffer ||
                           this.#connection.signalingState !== 'stable';
 
-    this.#negotiationState.ignoreOffer = !this.#callbacks.isPolite && offerCollision;
+    this.#negotiationState.ignoreOffer = !this.#isPolite && offerCollision;
     if (this.#negotiationState.ignoreOffer) return;
 
     try {
@@ -362,6 +364,8 @@ export class PeerConnection {
    * @returns {Promise<{offerSdp: string, acceptAnswer: (answerSdp: string) => Promise<void>}>}
    */
   async createInvite() {
+    this.#isPolite = false;
+
     // Create data channel (we're the offerer)
     const channel = this.#connection.createDataChannel('mesh');
     this.#setupDataChannel(channel);
@@ -387,6 +391,8 @@ export class PeerConnection {
    * @returns {Promise<string>} - answer SDP
    */
   async acceptInvite(offerSdp) {
+    this.#isPolite = true;
+
     // Set remote description (offer)
     await this.#setRemoteDescription({ type: 'offer', sdp: offerSdp });
 
