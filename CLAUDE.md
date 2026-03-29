@@ -9,6 +9,10 @@ Serverless peer-to-peer video conferencing. No build step, no central server. Pe
 ## Commands
 
 ```bash
+
+# Use lsof to check if server is already running
+lsof -i :5501 || echo "No process found on port 5501"
+
 # Serve locally (any static server from repo root)
 python -m http.server 5501
 # or
@@ -30,6 +34,8 @@ Tests are in `tests/` directory and run in the browser via `tests.html`. The tes
 - `test-runner.js` - Runs tests and displays results
 - `utils/queue.js` - Async queue for coordinating test messages
 - `tests.js` - Mesh connection tests covering full join flow and message exchange
+
+Please run the tests after every major change.
 
 ## Architecture
 

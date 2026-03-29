@@ -48,8 +48,9 @@ export async function runTests(onTestComplete) {
 
   const endTime = Date.now();
   const duration = endTime - startTime;
+  const failedCount = testResults.filter(r => !r.passed).length;
 
   console.log(`Finished running ${testResults.length} tests in ${duration}ms`);
-  console.log(`DONE:1`);
+  console.log(`DONE:${failedCount}`);
   document.body.innerHTML += `<div class="test-summary">Finished running ${testResults.length} tests in ${duration}ms</div>`;
 }

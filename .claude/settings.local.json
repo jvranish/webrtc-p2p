@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npx --package typescript tsc:*)",
-      "Bash(npx run-page:*)"
+      "Bash(npx run-page:*)",
+      "Bash(lsof:*)"
     ],
     "deny": [],
     "ask": []

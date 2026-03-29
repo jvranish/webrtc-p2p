@@ -1,5 +1,6 @@
 // @ts-check
 
+import { PeerConnection } from './peer-connection.js';
 import { encodeToken, decodeToken } from './utils.js';
 
 /**
@@ -14,8 +15,7 @@ import { encodeToken, decodeToken } from './utils.js';
  * @typedef {Object} ConnectedPeer
  * @property {string} id
  * @property {string} name
- * @property {RTCPeerConnection} connection
- * @property {RTCDataChannel} channel
+ * @property {PeerConnection} peerConnection
  */
 
 /**
@@ -40,31 +40,6 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(peerId: string, active: boolean) => void} onScreenShare
  */
 
-
-export const defaultIceServers = [
-  {
-    urls: "stun:stun.l.google.com:19302",
-  },
-];
-
-/**
- * Wait for ICE gathering to reach the 'complete' state.
- * @param {RTCPeerConnection} connection
- * @returns {Promise<void>}
- */
-function waitIceComplete(connection) {
-  if (connection.iceGatheringState === 'complete') return Promise.resolve();
-  return new Promise((resolve) => {
-    const handler = () => {
-      if (connection.iceGatheringState === 'complete') {
-        connection.removeEventListener('icegatheringstatechange', handler);
-        resolve();
-      }
-    };
-    connection.addEventListener('icegatheringstatechange', handler);
-  });
-}
-
 export class PeerMesh {
   /** @type {string} */
   #myId = '';
@@ -77,7 +52,7 @@ export class PeerMesh {
 
   /**
    * Outgoing relay connections waiting for a RELAY_ANSWER.
-   * @type {Map<string, {connection: RTCPeerConnection, channel: RTCDataChannel, name: string}>}
+   * @type {Map<string, {peerConnection: PeerConnection, name: string, acceptAnswer: (answerSdp: string) => Promise<void>}>}
    */
   #pendingOut = new Map();
 
@@ -87,14 +62,8 @@ export class PeerMesh {
   /** @type {MediaStreamTrack[]} */
   #localTracks = [];
 
-  /** @type {WeakMap<RTCPeerConnection, string>} */
-  #connectionToPeerId = new WeakMap();
-
-  /**
-   * Track negotiation state per peer to implement perfect negotiation.
-   * @type {Map<string, { makingOffer: boolean, ignoreOffer: boolean }>}
-   */
-  #negotiationState = new Map();
+  /** @type {WeakMap<PeerConnection, {peerId: string}>} */
+  #peerIdRefs = new WeakMap();
 
   /** @param {MeshCallbacks} callbacks */
   constructor(callbacks) {
@@ -112,30 +81,30 @@ export class PeerMesh {
     this.#myName = myName;
 
     // Note: peerId not known yet, will be set when answer arrives
-    const connection = this.#createConnection('pending');
-    const channel = connection.createDataChannel('mesh');
+    const peerConnection = this.#createPeerConnection('pending');
 
-    const offer = await this.#gatherOffer(connection);
+    const { offerSdp, acceptAnswer: acceptAnswerSdp } = await peerConnection.createInvite();
 
-    const tokenData = /** @type {TokenData} */ ({ peerId: myId, name: myName, sdp: offer.sdp ?? '', type: offer.type });
+    const tokenData = /** @type {TokenData} */ ({
+      peerId: myId,
+      name: myName,
+      sdp: offerSdp,
+      type: 'offer'
+    });
     const offerLink = `${location.href.split('#')[0]}#offer=${encodeToken(tokenData)}`;
 
     const acceptAnswer = async (/** @type {string} */ input) => {
       const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
-      // Update the peer ID mapping BEFORE setting remote description
-      // so that any ontrack events get the correct peer ID
-      this.#connectionToPeerId.set(connection, answerData.peerId);
 
-      // Also update the negotiation state key from 'pending' to the actual peer ID
-      const pendingState = this.#negotiationState.get('pending');
-      if (pendingState) {
-        this.#negotiationState.delete('pending');
-        this.#negotiationState.set(answerData.peerId, pendingState);
+      // Update the peer ID reference before setting remote description
+      // so that any ontrack events that fire will have the correct peer ID
+      const peerIdRef = this.#peerIdRefs.get(peerConnection);
+      if (peerIdRef) {
+        peerIdRef.peerId = answerData.peerId;
       }
 
-      await connection.setRemoteDescription(new RTCSessionDescription({ sdp: answerData.sdp, type: answerData.type }));
-      await this.#waitChannelOpen(channel);
-      this.#registerPeer(answerData.peerId, answerData.name, connection, channel, true);
+      await acceptAnswerSdp(answerData.sdp);
+      this.#registerPeer(answerData.peerId, answerData.name, peerConnection, true);
     };
 
     return { offerLink, acceptAnswer };
@@ -154,23 +123,19 @@ export class PeerMesh {
     this.#myName = myName;
 
     const offerData = this.#parseToken(offerInput);
-    const connection = this.#createConnection(offerData.peerId);
-
-    /** @type {Promise<RTCDataChannel>} */
-    const channelReady = new Promise((resolve) => {
-      connection.addEventListener('datachannel', (e) => resolve(e.channel), { once: true });
+    const peerConnection = this.#createPeerConnection(offerData.peerId, () => {
+      this.#registerPeer(offerData.peerId, offerData.name, peerConnection, false);
     });
 
-    await connection.setRemoteDescription(new RTCSessionDescription({ sdp: offerData.sdp, type: offerData.type }));
-    const answer = await this.#gatherAnswer(connection);
+    const answerSdp = await peerConnection.acceptInvite(offerData.sdp);
 
-    const tokenData = /** @type {TokenData} */ ({ peerId: myId, name: myName, sdp: answer.sdp ?? '', type: answer.type });
+    const tokenData = /** @type {TokenData} */ ({
+      peerId: myId,
+      name: myName,
+      sdp: answerSdp,
+      type: 'answer'
+    });
     const answerToken = encodeToken(tokenData);
-
-    channelReady.then(async (channel) => {
-      await this.#waitChannelOpen(channel);
-      this.#registerPeer(offerData.peerId, offerData.name, connection, channel, false);
-    }).catch((err) => console.error('PeerMesh: acceptInvite channel error', err));
 
     return answerToken;
   }
@@ -179,7 +144,7 @@ export class PeerMesh {
   broadcast(message) {
     const str = JSON.stringify(message);
     for (const peer of this.#peers.values()) {
-      if (peer.channel.readyState === 'open') peer.channel.send(str);
+      peer.peerConnection.sendData(str);
     }
   }
 
@@ -189,8 +154,8 @@ export class PeerMesh {
    */
   send(peerId, message) {
     const peer = this.#peers.get(peerId);
-    if (peer?.channel.readyState === 'open') {
-      peer.channel.send(JSON.stringify(message));
+    if (peer) {
+      peer.peerConnection.sendData(JSON.stringify(message));
     }
   }
 
@@ -202,15 +167,9 @@ export class PeerMesh {
   addLocalTracks(tracks) {
     this.#localTracks = tracks;
 
-    // Create a MediaStream from the tracks so they're properly grouped
-    const stream = new MediaStream(tracks);
-
-    // Add tracks to all existing peer connections with the stream
-    // This will automatically trigger 'negotiationneeded' event for each connection
+    // Add tracks to all existing peer connections
     for (const peer of this.#peers.values()) {
-      for (const track of tracks) {
-        peer.connection.addTrack(track, stream);
-      }
+      peer.peerConnection.addLocalTracks(tracks);
     }
   }
 
@@ -221,27 +180,18 @@ export class PeerMesh {
    */
   async replaceVideoTrack(newTrack) {
     for (const peer of this.#peers.values()) {
-      const senders = peer.connection.getSenders();
-      const videoSender = senders.find(s => s.track?.kind === 'video');
-
-      if (videoSender) {
-        // Replace existing video track
-        await videoSender.replaceTrack(newTrack);
-      } else if (newTrack) {
-        // No video sender exists yet, add the track
-        // Create a stream for the track
-        const stream = new MediaStream([newTrack]);
-        peer.connection.addTrack(newTrack, stream);
+      if (newTrack) {
+        await peer.peerConnection.replaceTrack(newTrack);
+      } else {
+        await peer.peerConnection.removeTrack('video');
       }
     }
 
     // Update stored local tracks
     if (newTrack) {
-      // Remove old video track and add new one
       this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
       this.#localTracks.push(newTrack);
     } else {
-      // Remove video track
       this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
     }
   }
@@ -253,27 +203,18 @@ export class PeerMesh {
    */
   async replaceAudioTrack(newTrack) {
     for (const peer of this.#peers.values()) {
-      const senders = peer.connection.getSenders();
-      const audioSender = senders.find(s => s.track?.kind === 'audio');
-
-      if (audioSender) {
-        // Replace existing audio track
-        await audioSender.replaceTrack(newTrack);
-      } else if (newTrack) {
-        // No audio sender exists yet, add the track
-        // Create a stream for the track
-        const stream = new MediaStream([newTrack]);
-        peer.connection.addTrack(newTrack, stream);
+      if (newTrack) {
+        await peer.peerConnection.replaceTrack(newTrack);
+      } else {
+        await peer.peerConnection.removeTrack('audio');
       }
     }
 
     // Update stored local tracks
     if (newTrack) {
-      // Remove old audio track and add new one
       this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
       this.#localTracks.push(newTrack);
     } else {
-      // Remove audio track
       this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
     }
   }
@@ -281,131 +222,51 @@ export class PeerMesh {
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /**
-   * Set up a new RTCPeerConnection with local tracks and remote stream handler.
+   * Create a new PeerConnection with callbacks for this mesh.
    * @param {string} peerId
-   * @returns {RTCPeerConnection}
+   * @param {() => void} [onDataChannelOpen] - Optional callback for when data channel opens
+   * @returns {PeerConnection}
    */
-  #createConnection(peerId) {
-    const connection = new RTCPeerConnection({ iceServers: defaultIceServers });
+  #createPeerConnection(peerId, onDataChannelOpen) {
+    // Create a mutable reference for the peer ID so it can be updated later
+    const peerIdRef = { peerId };
 
-    // Store mapping for later updates
-    this.#connectionToPeerId.set(connection, peerId);
+    const peerConnection = new PeerConnection({
+      onRemoteStream: (stream) => {
+        this.#callbacks.onRemoteStream(peerIdRef.peerId, stream);
+      },
+      onDisconnected: () => {
+        this.#handlePeerDisconnected(peerIdRef.peerId);
+      },
+      onDataChannelMessage: (data) => {
+        this.#handleMessage(peerIdRef.peerId, data);
+      },
+      onDataChannelClosed: () => {
+        this.#handlePeerDisconnected(peerIdRef.peerId);
+      },
+      onDataChannelOpen: onDataChannelOpen,
+    });
 
-    // Initialize negotiation state
-    this.#negotiationState.set(peerId, { makingOffer: false, ignoreOffer: false });
+    // Store the reference so we can update it later
+    this.#peerIdRefs.set(peerConnection, peerIdRef);
+
+    // Enable negotiation with callbacks
+    const isPolite = this.#myId < peerId;
+    peerConnection.enableNegotiation({
+      onOffer: (sdp) => {
+        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_OFFER', sdp });
+      },
+      onAnswer: (sdp) => {
+        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_ANSWER', sdp });
+      },
+    }, isPolite);
 
     // Add local tracks if available
     if (this.#localTracks.length > 0) {
-      const stream = new MediaStream(this.#localTracks);
-      for (const track of this.#localTracks) {
-        connection.addTrack(track, stream);
-      }
+      peerConnection.addLocalTracks(this.#localTracks);
     }
 
-    // Handle incoming remote tracks
-    /** @type {Map<string, MediaStream>} */
-    const remoteStreams = new Map();
-
-    connection.addEventListener('track', (e) => {
-      const stream = e.streams[0];
-      // Always get the current peer ID from the mapping, not the closure
-      const currentPeerId = this.#connectionToPeerId.get(connection) ?? peerId;
-      if (stream && !remoteStreams.has(stream.id)) {
-        remoteStreams.set(stream.id, stream);
-        this.#callbacks.onRemoteStream(currentPeerId, stream);
-      }
-    });
-
-    // Handle negotiation needed (when tracks are added/removed dynamically)
-    connection.addEventListener('negotiationneeded', async () => {
-      const actualPeerId = this.#connectionToPeerId.get(connection) ?? peerId;
-      const peer = this.#peers.get(actualPeerId);
-      if (!peer) return; // Not registered yet, initial negotiation handles this
-
-      await this.#handleNegotiationNeeded(actualPeerId, peer);
-    });
-
-    return connection;
-  }
-
-  /**
-   * Handle negotiation needed event - send renegotiation offer to peer.
-   * Uses perfect negotiation pattern to avoid glare.
-   * @param {string} peerId
-   * @param {ConnectedPeer} peer
-   */
-  async #handleNegotiationNeeded(peerId, peer) {
-    const state = this.#negotiationState.get(peerId);
-    if (!state) return;
-
-    try {
-      state.makingOffer = true;
-
-      await peer.connection.setLocalDescription();
-      const offer = peer.connection.localDescription;
-      if (!offer) return;
-
-      this.send(peerId, {
-        type: 'RENEGOTIATE_OFFER',
-        sdp: offer.sdp ?? '',
-      });
-    } catch (err) {
-      console.error('PeerMesh: Failed to create renegotiation offer:', err);
-    } finally {
-      state.makingOffer = false;
-    }
-  }
-
-  /**
-   * Determine if this peer is "polite" in the perfect negotiation pattern.
-   * Polite peer yields during conflicts. Based on lexicographic peer ID comparison.
-   * @param {string} remotePeerId
-   * @returns {boolean}
-   */
-  #isPolite(remotePeerId) {
-    return this.#myId < remotePeerId;
-  }
-
-  /**
-   * @param {RTCPeerConnection} connection
-   * @returns {Promise<RTCSessionDescription>}
-   */
-  async #gatherOffer(connection) {
-    // If we have local tracks, wait for negotiationneeded event first
-    // This ensures tracks are properly included in the offer
-    if (this.#localTracks.length > 0 && connection.signalingState === 'stable') {
-      await new Promise((resolve) => {
-        connection.addEventListener('negotiationneeded', resolve, { once: true });
-      });
-    }
-
-    const offerInit = await connection.createOffer();
-    await connection.setLocalDescription(offerInit);
-    await waitIceComplete(connection);
-    return /** @type {RTCSessionDescription} */ (connection.localDescription);
-  }
-
-  /**
-   * @param {RTCPeerConnection} connection
-   * @returns {Promise<RTCSessionDescription>}
-   */
-  async #gatherAnswer(connection) {
-    const answerInit = await connection.createAnswer();
-    await connection.setLocalDescription(answerInit);
-    await waitIceComplete(connection);
-    return /** @type {RTCSessionDescription} */ (connection.localDescription);
-  }
-
-  /**
-   * @param {RTCDataChannel} channel
-   * @returns {Promise<void>}
-   */
-  #waitChannelOpen(channel) {
-    if (channel.readyState === 'open') return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      channel.addEventListener('open', () => resolve(), { once: true });
-      channel.addEventListener('error', (e) => reject(e), { once: true });
-    });
+    return peerConnection;
   }
 
   /**
@@ -425,38 +286,25 @@ export class PeerMesh {
   /**
    * @param {string} id
    * @param {string} name
-   * @param {RTCPeerConnection} connection
-   * @param {RTCDataChannel} channel
+   * @param {PeerConnection} peerConnection
    * @param {boolean} sendPeerList — true when we're the one who invited this peer (A side)
    */
-  #registerPeer(id, name, connection, channel, sendPeerList) {
+  #registerPeer(id, name, peerConnection, sendPeerList) {
     if (this.#peers.has(id)) return; // already connected (shouldn't happen, but guard it)
 
-    // Update the connection-to-peerId mapping with the actual peer ID
-    this.#connectionToPeerId.set(connection, id);
-
     /** @type {ConnectedPeer} */
-    const peer = { id, name, connection, channel };
+    const peer = { id, name, peerConnection };
     this.#peers.set(id, peer);
-
-    channel.addEventListener('message', (e) => {
-      if (typeof e.data === 'string') this.#handleMessage(id, e.data);
-    });
-
-    const disconnect = () => this.#handlePeerDisconnected(id);
-    connection.addEventListener('iceconnectionstatechange', () => {
-      if (connection.iceConnectionState === 'failed' || connection.iceConnectionState === 'disconnected') {
-        disconnect();
-      }
-    });
-    channel.addEventListener('close', disconnect);
 
     if (sendPeerList) {
       const others = [...this.#peers.values()]
         .filter(p => p.id !== id)
         .map(p => ({ id: p.id, name: p.name }));
       if (others.length > 0) {
-        channel.send(JSON.stringify(/** @type {PeerListMessage} */({ type: 'PEER_LIST', peers: others })));
+        peerConnection.sendData(JSON.stringify(/** @type {PeerListMessage} */({
+          type: 'PEER_LIST',
+          peers: others
+        })));
       }
     }
 
@@ -513,32 +361,7 @@ export class PeerMesh {
     const peer = this.#peers.get(fromId);
     if (!peer) return;
 
-    const state = this.#negotiationState.get(fromId);
-    if (!state) return;
-
-    const polite = this.#isPolite(fromId);
-    const offerCollision = state.makingOffer || peer.connection.signalingState !== 'stable';
-
-    state.ignoreOffer = !polite && offerCollision;
-    if (state.ignoreOffer) return;
-
-    try {
-      await peer.connection.setRemoteDescription({
-        type: 'offer',
-        sdp: message.sdp,
-      });
-
-      await peer.connection.setLocalDescription();
-      const answer = peer.connection.localDescription;
-      if (!answer) return;
-
-      this.send(fromId, {
-        type: 'RENEGOTIATE_ANSWER',
-        sdp: answer.sdp ?? '',
-      });
-    } catch (err) {
-      console.error('PeerMesh: Failed to handle renegotiation offer:', err);
-    }
+    await peer.peerConnection.handleOffer(message.sdp);
   }
 
   /**
@@ -550,14 +373,7 @@ export class PeerMesh {
     const peer = this.#peers.get(fromId);
     if (!peer) return;
 
-    try {
-      await peer.connection.setRemoteDescription({
-        type: 'answer',
-        sdp: message.sdp,
-      });
-    } catch (err) {
-      console.error('PeerMesh: Failed to handle renegotiation answer:', err);
-    }
+    await peer.peerConnection.handleAnswer(message.sdp);
   }
 
   /**
@@ -565,18 +381,17 @@ export class PeerMesh {
    * @param {string} targetName
    */
   async #initiateRelayConnection(targetId, targetName) {
-    const connection = this.#createConnection(targetId);
-    const channel = connection.createDataChannel('mesh');
+    const peerConnection = this.#createPeerConnection(targetId);
 
-    const offer = await this.#gatherOffer(connection);
-    this.#pendingOut.set(targetId, { connection, channel, name: targetName });
+    const { offerSdp, acceptAnswer } = await peerConnection.createInvite();
+    this.#pendingOut.set(targetId, { peerConnection, name: targetName, acceptAnswer });
 
     this.broadcast(/** @type {RelayOfferMessage} */({
       type: 'RELAY_OFFER',
       from: this.#myId,
       to: targetId,
       name: this.#myName,
-      sdp: offer.sdp ?? '',
+      sdp: offerSdp,
     }));
   }
 
@@ -585,27 +400,18 @@ export class PeerMesh {
    * @param {string} viaId — peer that forwarded this relay offer to us
    */
   async #handleRelayOffer(message, viaId) {
-    const connection = this.#createConnection(message.from);
-
-    /** @type {Promise<RTCDataChannel>} */
-    const channelReady = new Promise((resolve) => {
-      connection.addEventListener('datachannel', (e) => resolve(e.channel), { once: true });
+    const peerConnection = this.#createPeerConnection(message.from, () => {
+      this.#registerPeer(message.from, message.name, peerConnection, false);
     });
 
-    await connection.setRemoteDescription(new RTCSessionDescription({ sdp: message.sdp, type: 'offer' }));
-    const answer = await this.#gatherAnswer(connection);
+    const answerSdp = await peerConnection.acceptInvite(message.sdp);
 
     this.send(viaId, /** @type {RelayAnswerMessage} */({
       type: 'RELAY_ANSWER',
       from: this.#myId,
       to: message.from,
-      sdp: answer.sdp ?? '',
+      sdp: answerSdp,
     }));
-
-    channelReady.then(async (channel) => {
-      await this.#waitChannelOpen(channel);
-      this.#registerPeer(message.from, message.name, connection, channel, false);
-    }).catch(err => console.error('PeerMesh: relay offer channel error', err));
   }
 
   /** @param {RelayAnswerMessage} message */
@@ -614,8 +420,7 @@ export class PeerMesh {
     if (!pending) return;
     this.#pendingOut.delete(message.from);
 
-    await pending.connection.setRemoteDescription(new RTCSessionDescription({ sdp: message.sdp, type: 'answer' }));
-    await this.#waitChannelOpen(pending.channel);
-    this.#registerPeer(message.from, pending.name, pending.connection, pending.channel, false);
+    await pending.acceptAnswer(message.sdp);
+    this.#registerPeer(message.from, pending.name, pending.peerConnection, false);
   }
 }
