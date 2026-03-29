@@ -245,21 +245,17 @@ export class PeerMesh {
         this.#handlePeerDisconnected(peerIdRef.peerId);
       },
       onDataChannelOpen: onDataChannelOpen,
+      onRenegotiateOffer: (sdp) => {
+        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_OFFER', sdp });
+      },
+      onRenegotiateAnswer: (sdp) => {
+        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_ANSWER', sdp });
+      },
+      isPolite: this.#myId < peerId,
     });
 
     // Store the reference so we can update it later
     this.#peerIdRefs.set(peerConnection, peerIdRef);
-
-    // Enable negotiation with callbacks
-    const isPolite = this.#myId < peerId;
-    peerConnection.enableNegotiation({
-      onOffer: (sdp) => {
-        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_OFFER', sdp });
-      },
-      onAnswer: (sdp) => {
-        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_ANSWER', sdp });
-      },
-    }, isPolite);
 
     // Add local tracks if available
     if (this.#localTracks.length > 0) {

@@ -9,12 +9,9 @@
  * @property {() => void} [onDataChannelOpen] - Called when the data channel is open and ready
  * @property {(data: string) => void} [onDataChannelMessage] - Called when a message is received on the data channel
  * @property {() => void} [onDataChannelClosed] - Called when the data channel is closed
- */
-
-/**
- * @typedef {Object} NegotiationCallbacks
- * @property {(sdp: string) => void} onOffer - Called when we need to send an offer to the remote peer
- * @property {(sdp: string) => void} onAnswer - Called when we need to send an answer to the remote peer
+ * @property {(sdp: string) => void} [onRenegotiateOffer] - Called when a renegotiation offer needs to be sent to the remote peer
+ * @property {(sdp: string) => void} [onRenegotiateAnswer] - Called when a renegotiation answer needs to be sent to the remote peer
+ * @property {boolean} [isPolite] - Whether this peer is "polite" in the perfect negotiation pattern
  */
 
 export const defaultIceServers = [
@@ -57,12 +54,6 @@ export class PeerConnection {
   /** @type {{ makingOffer: boolean, ignoreOffer: boolean }} */
   #negotiationState = { makingOffer: false, ignoreOffer: false };
 
-  /** @type {NegotiationCallbacks | null} */
-  #negotiationCallbacks = null;
-
-  /** @type {boolean} */
-  #isPolite = false;
-
   /** @type {boolean} */
   #isConnected = false;
 
@@ -77,38 +68,6 @@ export class PeerConnection {
     this.#callbacks = callbacks;
     this.#connection = new RTCPeerConnection(config);
     this.#setupEventHandlers();
-  }
-
-  /**
-   * Get the underlying RTCPeerConnection instance.
-   * @returns {RTCPeerConnection}
-   */
-  get connection() {
-    return this.#connection;
-  }
-
-  /**
-   * Get the current connection state.
-   * @returns {RTCPeerConnectionState}
-   */
-  get connectionState() {
-    return this.#connection.connectionState;
-  }
-
-  /**
-   * Get the current ICE connection state.
-   * @returns {RTCIceConnectionState}
-   */
-  get iceConnectionState() {
-    return this.#connection.iceConnectionState;
-  }
-
-  /**
-   * Get the current signaling state.
-   * @returns {RTCSignalingState}
-   */
-  get signalingState() {
-    return this.#connection.signalingState;
   }
 
   /**
@@ -147,8 +106,6 @@ export class PeerConnection {
 
     // Handle negotiation needed (when tracks are added/removed dynamically)
     this.#connection.addEventListener('negotiationneeded', async () => {
-      if (!this.#negotiationCallbacks) return;
-
       await this.#handleNegotiationNeeded();
     });
 
@@ -191,7 +148,7 @@ export class PeerConnection {
    */
   async #handleNegotiationNeeded() {
     // Don't handle renegotiation until the initial connection is complete
-    if (!this.#isConnected || !this.#negotiationCallbacks) return;
+    if (!this.#isConnected || !this.#callbacks.onRenegotiateOffer) return;
 
     try {
       this.#negotiationState.makingOffer = true;
@@ -200,23 +157,12 @@ export class PeerConnection {
       const offer = this.#connection.localDescription;
       if (!offer) return;
 
-      this.#negotiationCallbacks.onOffer(offer.sdp ?? '');
+      this.#callbacks.onRenegotiateOffer(offer.sdp ?? '');
     } catch (err) {
       console.error('PeerConnection: Failed to create renegotiation offer:', err);
     } finally {
       this.#negotiationState.makingOffer = false;
     }
-  }
-
-  /**
-   * Enable automatic renegotiation with the provided callbacks.
-   * This is required if you want to dynamically add/remove tracks after connection.
-   * @param {NegotiationCallbacks} callbacks
-   * @param {boolean} isPolite - Whether this peer is "polite" in the perfect negotiation pattern
-   */
-  enableNegotiation(callbacks, isPolite = false) {
-    this.#negotiationCallbacks = callbacks;
-    this.#isPolite = isPolite;
   }
 
   /**
@@ -284,7 +230,7 @@ export class PeerConnection {
    * Create an offer with full ICE candidates gathered.
    * @returns {Promise<RTCSessionDescriptionInit>}
    */
-  async createOffer() {
+  async #createOffer() {
     const offerInit = await this.#connection.createOffer();
     await this.#connection.setLocalDescription(offerInit);
     await waitIceComplete(this.#connection);
@@ -300,7 +246,7 @@ export class PeerConnection {
    * Remote description must be set first.
    * @returns {Promise<RTCSessionDescriptionInit>}
    */
-  async createAnswer() {
+  async #createAnswer() {
     const answerInit = await this.#connection.createAnswer();
     await this.#connection.setLocalDescription(answerInit);
     await waitIceComplete(this.#connection);
@@ -316,7 +262,7 @@ export class PeerConnection {
    * @param {RTCSessionDescriptionInit} description
    * @returns {Promise<void>}
    */
-  async setRemoteDescription(description) {
+  async #setRemoteDescription(description) {
     await this.#connection.setRemoteDescription(description);
     // Mark as connected after setting remote description (initial negotiation complete)
     this.#isConnected = true;
@@ -331,7 +277,7 @@ export class PeerConnection {
     const offerCollision = this.#negotiationState.makingOffer ||
                           this.#connection.signalingState !== 'stable';
 
-    this.#negotiationState.ignoreOffer = !this.#isPolite && offerCollision;
+    this.#negotiationState.ignoreOffer = !this.#callbacks.isPolite && offerCollision;
     if (this.#negotiationState.ignoreOffer) return;
 
     try {
@@ -342,9 +288,9 @@ export class PeerConnection {
 
       await this.#connection.setLocalDescription();
       const answer = this.#connection.localDescription;
-      if (!answer || !this.#negotiationCallbacks) return;
+      if (!answer || !this.#callbacks.onRenegotiateAnswer) return;
 
-      this.#negotiationCallbacks.onAnswer(answer.sdp ?? '');
+      this.#callbacks.onRenegotiateAnswer(answer.sdp ?? '');
     } catch (err) {
       console.error('PeerConnection: Failed to handle offer:', err);
     }
@@ -421,10 +367,10 @@ export class PeerConnection {
     this.#setupDataChannel(channel);
 
     // Create offer
-    const offer = await this.createOffer();
+    const offer = await this.#createOffer();
 
     const acceptAnswer = async (/** @type {string} */ answerSdp) => {
-      await this.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      await this.#setRemoteDescription({ type: 'answer', sdp: answerSdp });
       await this.#waitDataChannelOpen();
     };
 
@@ -442,10 +388,10 @@ export class PeerConnection {
    */
   async acceptInvite(offerSdp) {
     // Set remote description (offer)
-    await this.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+    await this.#setRemoteDescription({ type: 'offer', sdp: offerSdp });
 
     // Create answer
-    const answer = await this.createAnswer();
+    const answer = await this.#createAnswer();
 
     // Data channel will be received via 'datachannel' event (already set up in #setupEventHandlers)
     // and will trigger onDataChannelOpen callback when ready
