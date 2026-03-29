@@ -8,7 +8,6 @@
  * @property {(state: RTCIceConnectionState) => void} [onIceConnectionStateChange] - Called when ICE connection state changes
  * @property {() => void} [onDataChannelOpen] - Called when the data channel is open and ready
  * @property {(data: string) => void} [onDataChannelMessage] - Called when a message is received on the data channel
- * @property {() => void} [onDataChannelClosed] - Called when the data channel is closed
  */
 
 export const defaultIceServers = [
@@ -140,7 +139,7 @@ export class PeerConnection {
     });
 
     channel.addEventListener('close', () => {
-      this.#callbacks.onDataChannelClosed?.();
+      this.#callbacks.onDisconnected?.();
     });
 
     channel.addEventListener('error', (e) => {

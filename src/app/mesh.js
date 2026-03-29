@@ -239,9 +239,6 @@ export class PeerMesh {
       onDataChannelMessage: (data) => {
         this.#handleMessage(peerIdRef.peerId, data);
       },
-      onDataChannelClosed: () => {
-        this.#handlePeerDisconnected(peerIdRef.peerId);
-      },
       onDataChannelOpen: onDataChannelOpen,
     });
 
