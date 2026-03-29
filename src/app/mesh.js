@@ -26,9 +26,7 @@ import { encodeToken, decodeToken } from './utils.js';
  * @typedef {{ type: 'PEER_LEFT' }} PeerLeftMessage
  * @typedef {{ type: 'CHAT', text: string, timestamp: number }} ChatMessage
  * @typedef {{ type: 'SCREEN_SHARE', active: boolean }} ScreenShareMessage
- * @typedef {{ type: 'RENEGOTIATE_OFFER', sdp: string }} RenegotiateOfferMessage
- * @typedef {{ type: 'RENEGOTIATE_ANSWER', sdp: string }} RenegotiateAnswerMessage
- * @typedef {PeerListMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage | RenegotiateOfferMessage | RenegotiateAnswerMessage} MeshMessage
+ * @typedef {PeerListMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage} MeshMessage
  */
 
 /**
@@ -245,12 +243,6 @@ export class PeerMesh {
         this.#handlePeerDisconnected(peerIdRef.peerId);
       },
       onDataChannelOpen: onDataChannelOpen,
-      onRenegotiateOffer: (sdp) => {
-        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_OFFER', sdp });
-      },
-      onRenegotiateAnswer: (sdp) => {
-        this.send(peerIdRef.peerId, { type: 'RENEGOTIATE_ANSWER', sdp });
-      },
     });
 
     // Store the reference so we can update it later
@@ -338,37 +330,9 @@ export class PeerMesh {
       } else {
         this.send(message.to, message);
       }
-    } else if (message.type === 'RENEGOTIATE_OFFER') {
-      this.#handleRenegotiateOffer(fromId, message).catch(err => console.error('PeerMesh: handleRenegotiateOffer failed', err));
-    } else if (message.type === 'RENEGOTIATE_ANSWER') {
-      this.#handleRenegotiateAnswer(fromId, message).catch(err => console.error('PeerMesh: handleRenegotiateAnswer failed', err));
     } else {
       this.#callbacks.onMessage(fromId, message);
     }
-  }
-
-  /**
-   * Handle incoming renegotiation offer using perfect negotiation pattern.
-   * @param {string} fromId
-   * @param {RenegotiateOfferMessage} message
-   */
-  async #handleRenegotiateOffer(fromId, message) {
-    const peer = this.#peers.get(fromId);
-    if (!peer) return;
-
-    await peer.peerConnection.handleOffer(message.sdp);
-  }
-
-  /**
-   * Handle incoming renegotiation answer.
-   * @param {string} fromId
-   * @param {RenegotiateAnswerMessage} message
-   */
-  async #handleRenegotiateAnswer(fromId, message) {
-    const peer = this.#peers.get(fromId);
-    if (!peer) return;
-
-    await peer.peerConnection.handleAnswer(message.sdp);
   }
 
   /**

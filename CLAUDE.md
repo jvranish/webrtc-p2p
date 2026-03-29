@@ -10,8 +10,8 @@ Serverless peer-to-peer video conferencing. No build step, no central server. Pe
 
 ```bash
 
-# Use lsof to check if server is already running
-lsof -i :5501 || echo "No process found on port 5501"
+# Use lsof to check if server is already running (it might be a vscode server live-server)
+lsof -i :5501 | grep LISTEN
 
 # Serve locally (any static server from repo root)
 python -m http.server 5501
@@ -74,12 +74,6 @@ PEER_LEFT    — {}                              graceful disconnect
 CHAT         — {text, timestamp}               chat message
 SCREEN_SHARE — {active}                        (Phase 4) track swap notification
 ```
-
-### Build Phases
-- **Phase 1 (current):** Join flow + mesh formation + chat (no video)
-- **Phase 2:** Camera + mic, video grid
-- **Phase 3:** Pin view layout
-- **Phase 4:** Screen share, mute/video toggle, device selection
 
 ## TypeScript/JSDoc Standards
 

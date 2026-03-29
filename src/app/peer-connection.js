@@ -9,8 +9,6 @@
  * @property {() => void} [onDataChannelOpen] - Called when the data channel is open and ready
  * @property {(data: string) => void} [onDataChannelMessage] - Called when a message is received on the data channel
  * @property {() => void} [onDataChannelClosed] - Called when the data channel is closed
- * @property {(sdp: string) => void} [onRenegotiateOffer] - Called when a renegotiation offer needs to be sent to the remote peer
- * @property {(sdp: string) => void} [onRenegotiateAnswer] - Called when a renegotiation answer needs to be sent to the remote peer
  */
 
 export const defaultIceServers = [
@@ -130,7 +128,14 @@ export class PeerConnection {
 
     channel.addEventListener('message', (e) => {
       if (typeof e.data === 'string') {
-        this.#callbacks.onDataChannelMessage?.(e.data);
+        const message = JSON.parse(e.data);
+        if (message.type === 'RENEGOTIATE_OFFER') {
+          this.#handleRenegotiateOffer(message.sdp).catch(err => console.error('PeerConnection: handleRenegotiateOffer failed', err));
+        } else if (message.type === 'RENEGOTIATE_ANSWER') {
+          this.#handleRenegotiateAnswer(message.sdp).catch(err => console.error('PeerConnection: handleRenegotiateAnswer failed', err));
+        } else {
+          this.#callbacks.onDataChannelMessage?.(e.data);
+        }
       }
     });
 
@@ -150,7 +155,7 @@ export class PeerConnection {
    */
   async #handleNegotiationNeeded() {
     // Don't handle renegotiation until the initial connection is complete
-    if (!this.#isConnected || !this.#callbacks.onRenegotiateOffer) return;
+    if (!this.#isConnected) return;
 
     try {
       this.#negotiationState.makingOffer = true;
@@ -159,7 +164,7 @@ export class PeerConnection {
       const offer = this.#connection.localDescription;
       if (!offer) return;
 
-      this.#callbacks.onRenegotiateOffer(offer.sdp ?? '');
+      this.sendData(JSON.stringify({ type: 'RENEGOTIATE_OFFER', sdp: offer.sdp ?? '' }));
     } catch (err) {
       console.error('PeerConnection: Failed to create renegotiation offer:', err);
     } finally {
@@ -271,11 +276,11 @@ export class PeerConnection {
   }
 
   /**
-   * Handle an incoming offer using the perfect negotiation pattern.
+   * Handle an incoming renegotiation offer using the perfect negotiation pattern.
    * @param {string} sdp
    * @returns {Promise<void>}
    */
-  async handleOffer(sdp) {
+  async #handleRenegotiateOffer(sdp) {
     const offerCollision = this.#negotiationState.makingOffer ||
                           this.#connection.signalingState !== 'stable';
 
@@ -283,34 +288,28 @@ export class PeerConnection {
     if (this.#negotiationState.ignoreOffer) return;
 
     try {
-      await this.#connection.setRemoteDescription({
-        type: 'offer',
-        sdp,
-      });
+      await this.#connection.setRemoteDescription({ type: 'offer', sdp });
 
       await this.#connection.setLocalDescription();
       const answer = this.#connection.localDescription;
-      if (!answer || !this.#callbacks.onRenegotiateAnswer) return;
+      if (!answer) return;
 
-      this.#callbacks.onRenegotiateAnswer(answer.sdp ?? '');
+      this.sendData(JSON.stringify({ type: 'RENEGOTIATE_ANSWER', sdp: answer.sdp ?? '' }));
     } catch (err) {
-      console.error('PeerConnection: Failed to handle offer:', err);
+      console.error('PeerConnection: Failed to handle renegotiation offer:', err);
     }
   }
 
   /**
-   * Handle an incoming answer.
+   * Handle an incoming renegotiation answer.
    * @param {string} sdp
    * @returns {Promise<void>}
    */
-  async handleAnswer(sdp) {
+  async #handleRenegotiateAnswer(sdp) {
     try {
-      await this.#connection.setRemoteDescription({
-        type: 'answer',
-        sdp,
-      });
+      await this.#connection.setRemoteDescription({ type: 'answer', sdp });
     } catch (err) {
-      console.error('PeerConnection: Failed to handle answer:', err);
+      console.error('PeerConnection: Failed to handle renegotiation answer:', err);
     }
   }
 
