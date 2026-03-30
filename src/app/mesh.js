@@ -19,14 +19,24 @@ import { encodeToken, decodeToken } from './utils.js';
  */
 
 /**
- * @typedef {{ type: 'PEER_LIST', peers: Array<{id: string, name: string}> }} PeerListMessage
- * @typedef {{ type: 'RELAY_OFFER', from: string, to: string, name: string, sdp: string }} RelayOfferMessage
- * @typedef {{ type: 'RELAY_ANSWER', from: string, to: string, sdp: string }} RelayAnswerMessage
+ * Each peer owns and maintains its own entry. Merge rule: max(version) wins.
+ * @typedef {Object} TopologyEntry
+ * @property {string} id
+ * @property {string} name
+ * @property {number} version
+ * @property {string[]} neighbors  - IDs this peer is directly connected to
+ */
+
+/**
+ * @typedef {{ type: 'TOPOLOGY', entries: TopologyEntry[] }} TopologyMessage
+ * @typedef {{ type: 'TOPOLOGY_UPDATE', entry: TopologyEntry }} TopologyUpdateMessage
+ * @typedef {{ type: 'RELAY_OFFER', msgId: string, from: string, to: string, name: string, sdp: string }} RelayOfferMessage
+ * @typedef {{ type: 'RELAY_ANSWER', msgId: string, from: string, to: string, sdp: string }} RelayAnswerMessage
  * @typedef {{ type: 'PEER_META', name: string }} PeerMetaMessage
  * @typedef {{ type: 'PEER_LEFT' }} PeerLeftMessage
  * @typedef {{ type: 'CHAT', text: string, timestamp: number }} ChatMessage
  * @typedef {{ type: 'SCREEN_SHARE', active: boolean }} ScreenShareMessage
- * @typedef {PeerListMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage} MeshMessage
+ * @typedef {TopologyMessage | TopologyUpdateMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage} MeshMessage
  */
 
 /**
@@ -63,6 +73,25 @@ export class PeerMesh {
   /** @type {WeakMap<PeerConnection, {peerId: string}>} */
   #peerIdRefs = new WeakMap();
 
+  /**
+   * Known mesh topology: maps peer ID → its self-reported entry.
+   * We are authoritative for our own entry; remote entries are accepted only if version is higher.
+   * @type {Map<string, TopologyEntry>}
+   */
+  #topology = new Map();
+
+  /** @type {number} */
+  #myVersion = 0;
+
+  /** O(1) seen-set for relay message deduplication. */
+  /** @type {Set<string>} */
+  #seenMsgIdSet = new Set();
+  /** @type {string[]} */
+  #seenMsgIdQueue = [];
+
+  /** @type {ReturnType<typeof setInterval> | undefined} */
+  #antiEntropyInterval = undefined;
+
   /** @param {MeshCallbacks} callbacks */
   constructor(callbacks) {
     this.#callbacks = callbacks;
@@ -77,6 +106,7 @@ export class PeerMesh {
   async createInvite(myId, myName) {
     this.#myId = myId;
     this.#myName = myName;
+    this.#updateMyEntry();
 
     // Note: peerId not known yet, will be set when answer arrives
     const peerConnection = this.#createPeerConnection('pending');
@@ -102,7 +132,7 @@ export class PeerMesh {
       }
 
       await acceptAnswerSdp(answerData.sdp);
-      this.#registerPeer(answerData.peerId, answerData.name, peerConnection, true);
+      this.#registerPeer(answerData.peerId, answerData.name, peerConnection);
     };
 
     return { offerLink, acceptAnswer };
@@ -119,10 +149,11 @@ export class PeerMesh {
   async acceptInvite(offerInput, myId, myName) {
     this.#myId = myId;
     this.#myName = myName;
+    this.#updateMyEntry();
 
     const offerData = this.#parseToken(offerInput);
     const peerConnection = this.#createPeerConnection(offerData.peerId, () => {
-      this.#registerPeer(offerData.peerId, offerData.name, peerConnection, false);
+      this.#registerPeer(offerData.peerId, offerData.name, peerConnection);
     });
 
     const answerSdp = await peerConnection.acceptInvite(offerData.sdp);
@@ -268,31 +299,129 @@ export class PeerMesh {
   }
 
   /**
+   * Update our own topology entry (call whenever our neighbor set changes).
+   * @returns {TopologyEntry}
+   */
+  #updateMyEntry() {
+    this.#myVersion++;
+    const entry = /** @type {TopologyEntry} */ ({
+      id: this.#myId,
+      name: this.#myName,
+      version: this.#myVersion,
+      neighbors: [...this.#peers.keys()],
+    });
+    this.#topology.set(this.#myId, entry);
+    return entry;
+  }
+
+  /**
+   * Merge remote topology entries using LWW (last-write-wins by version).
+   * We are authoritative for our own entry, so we skip it.
+   * @param {TopologyEntry[]} entries
+   * @returns {TopologyEntry[]} entries that were new or updated
+   */
+  #mergeTopology(entries) {
+    /** @type {TopologyEntry[]} */
+    const updated = [];
+    for (const entry of entries) {
+      if (entry.id === this.#myId) continue;
+      const existing = this.#topology.get(entry.id);
+      if (!existing || entry.version > existing.version) {
+        this.#topology.set(entry.id, entry);
+        updated.push(entry);
+      }
+    }
+    return updated;
+  }
+
+  /**
+   * Check topology for peers we're not yet connected to and initiate relay connections.
+   * The peer with the lexicographically lower ID is responsible for initiating,
+   * preventing both sides from sending duplicate offers simultaneously.
+   */
+  #checkForNewPeers() {
+    for (const [id, entry] of this.#topology) {
+      if (id === this.#myId) continue;
+      if (this.#peers.has(id)) continue;
+      if (this.#pendingOut.has(id)) continue;
+      if (this.#myId < id) {
+        this.#initiateRelayConnection(id, entry.name)
+          .catch(err => console.error('PeerMesh: relay connection failed', err));
+      }
+    }
+  }
+
+  /**
+   * Mark a relay msgId as seen. Returns true if already seen (message should be dropped).
+   * Bounded to 500 entries via a circular queue.
+   * @param {string} msgId
+   * @returns {boolean}
+   */
+  #markSeen(msgId) {
+    if (this.#seenMsgIdSet.has(msgId)) return true;
+    this.#seenMsgIdSet.add(msgId);
+    this.#seenMsgIdQueue.push(msgId);
+    if (this.#seenMsgIdQueue.length > 500) {
+      const evicted = this.#seenMsgIdQueue.shift();
+      if (evicted) this.#seenMsgIdSet.delete(evicted);
+    }
+    return false;
+  }
+
+  /**
+   * Start a 30-second anti-entropy interval that re-gossips our own topology entry.
+   * This heals any divergence caused by dropped TOPOLOGY_UPDATE messages.
+   */
+  #startAntiEntropy() {
+    if (this.#antiEntropyInterval !== undefined) return;
+    this.#antiEntropyInterval = setInterval(() => {
+      const entry = this.#topology.get(this.#myId);
+      if (!entry || this.#peers.size === 0) return;
+      const str = JSON.stringify(/** @type {TopologyUpdateMessage} */({
+        type: 'TOPOLOGY_UPDATE',
+        entry,
+      }));
+      for (const p of this.#peers.values()) {
+        p.peerConnection.sendData(str);
+      }
+    }, 30_000);
+  }
+
+  /**
    * @param {string} id
    * @param {string} name
    * @param {PeerConnection} peerConnection
-   * @param {boolean} sendPeerList — true when we're the one who invited this peer (A side)
    */
-  #registerPeer(id, name, peerConnection, sendPeerList) {
+  #registerPeer(id, name, peerConnection) {
     if (this.#peers.has(id)) return; // already connected (shouldn't happen, but guard it)
 
     /** @type {ConnectedPeer} */
     const peer = { id, name, peerConnection };
     this.#peers.set(id, peer);
 
-    if (sendPeerList) {
-      const others = [...this.#peers.values()]
-        .filter(p => p.id !== id)
-        .map(p => ({ id: p.id, name: p.name }));
-      if (others.length > 0) {
-        peerConnection.sendData(JSON.stringify(/** @type {PeerListMessage} */({
-          type: 'PEER_LIST',
-          peers: others
-        })));
+    // Update our own entry to include the new neighbor
+    const myEntry = this.#updateMyEntry();
+
+    // Send full topology (anti-entropy sync) to the new peer
+    peerConnection.sendData(JSON.stringify(/** @type {TopologyMessage} */({
+      type: 'TOPOLOGY',
+      entries: [...this.#topology.values()],
+    })));
+
+    this.#callbacks.onPeerConnected(peer);
+
+    // Broadcast our updated entry to all other peers
+    const updateMsg = JSON.stringify(/** @type {TopologyUpdateMessage} */({
+      type: 'TOPOLOGY_UPDATE',
+      entry: myEntry,
+    }));
+    for (const p of this.#peers.values()) {
+      if (p.id !== id) {
+        p.peerConnection.sendData(updateMsg);
       }
     }
 
-    this.#callbacks.onPeerConnected(peer);
+    this.#startAntiEntropy();
   }
 
   /** @param {string} peerId */
@@ -300,6 +429,16 @@ export class PeerMesh {
     if (!this.#peers.has(peerId)) return;
     this.#peers.delete(peerId);
     this.#callbacks.onPeerDisconnected(peerId);
+
+    // Update our own entry to remove the departed neighbor
+    const myEntry = this.#updateMyEntry();
+    const updateMsg = JSON.stringify(/** @type {TopologyUpdateMessage} */({
+      type: 'TOPOLOGY_UPDATE',
+      entry: myEntry,
+    }));
+    for (const p of this.#peers.values()) {
+      p.peerConnection.sendData(updateMsg);
+    }
   }
 
   /**
@@ -309,23 +448,49 @@ export class PeerMesh {
   #handleMessage(fromId, rawData) {
     const message = /** @type {MeshMessage} */ (JSON.parse(rawData));
 
-    if (message.type === 'PEER_LIST') {
-      // Fire-and-forget; each relay connection is independent
-      for (const peerInfo of message.peers) {
-        this.#initiateRelayConnection(peerInfo.id, peerInfo.name)
-          .catch(err => console.error('PeerMesh: relay connection failed', err));
+    if (message.type === 'TOPOLOGY') {
+      const updated = this.#mergeTopology(message.entries);
+      if (updated.length > 0) {
+        // Fan-out newly-learned entries to all other peers (same as TOPOLOGY_UPDATE)
+        for (const entry of updated) {
+          const str = JSON.stringify(/** @type {TopologyUpdateMessage} */({ type: 'TOPOLOGY_UPDATE', entry }));
+          for (const p of this.#peers.values()) {
+            if (p.id !== fromId) p.peerConnection.sendData(str);
+          }
+        }
+        this.#checkForNewPeers();
+      }
+    } else if (message.type === 'TOPOLOGY_UPDATE') {
+      const updated = this.#mergeTopology([message.entry]);
+      if (updated.length > 0) {
+        // Fan-out: re-gossip to all peers except the sender
+        const str = JSON.stringify(message);
+        for (const p of this.#peers.values()) {
+          if (p.id !== fromId) p.peerConnection.sendData(str);
+        }
+        this.#checkForNewPeers();
       }
     } else if (message.type === 'RELAY_OFFER') {
+      if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
-        this.#handleRelayOffer(message, fromId).catch(err => console.error('PeerMesh: handleRelayOffer failed', err));
+        this.#handleRelayOffer(message).catch(err => console.error('PeerMesh: handleRelayOffer failed', err));
       } else {
-        this.send(message.to, message);
+        // Flood to all peers except sender
+        const str = JSON.stringify(message);
+        for (const p of this.#peers.values()) {
+          if (p.id !== fromId) p.peerConnection.sendData(str);
+        }
       }
     } else if (message.type === 'RELAY_ANSWER') {
+      if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
         this.#handleRelayAnswer(message).catch(err => console.error('PeerMesh: handleRelayAnswer failed', err));
       } else {
-        this.send(message.to, message);
+        // Flood to all peers except sender
+        const str = JSON.stringify(message);
+        for (const p of this.#peers.values()) {
+          if (p.id !== fromId) p.peerConnection.sendData(str);
+        }
       }
     } else {
       this.#callbacks.onMessage(fromId, message);
@@ -337,37 +502,53 @@ export class PeerMesh {
    * @param {string} targetName
    */
   async #initiateRelayConnection(targetId, targetName) {
+    if (this.#peers.has(targetId)) return;
+    if (this.#pendingOut.has(targetId)) return;
+
     const peerConnection = this.#createPeerConnection(targetId);
 
     const { offerSdp, acceptAnswer } = await peerConnection.createInvite();
     this.#pendingOut.set(targetId, { peerConnection, name: targetName, acceptAnswer });
 
-    this.broadcast(/** @type {RelayOfferMessage} */({
+    const msgId = crypto.randomUUID();
+    this.#markSeen(msgId); // Prevent re-processing if flooded back to us
+
+    const str = JSON.stringify(/** @type {RelayOfferMessage} */({
       type: 'RELAY_OFFER',
+      msgId,
       from: this.#myId,
       to: targetId,
       name: this.#myName,
       sdp: offerSdp,
     }));
+    for (const p of this.#peers.values()) {
+      p.peerConnection.sendData(str);
+    }
   }
 
-  /**
-   * @param {RelayOfferMessage} message
-   * @param {string} viaId — peer that forwarded this relay offer to us
-   */
-  async #handleRelayOffer(message, viaId) {
+  /** @param {RelayOfferMessage} message */
+  async #handleRelayOffer(message) {
+    if (this.#peers.has(message.from)) return; // already connected
+
     const peerConnection = this.#createPeerConnection(message.from, () => {
-      this.#registerPeer(message.from, message.name, peerConnection, false);
+      this.#registerPeer(message.from, message.name, peerConnection);
     });
 
     const answerSdp = await peerConnection.acceptInvite(message.sdp);
 
-    this.send(viaId, /** @type {RelayAnswerMessage} */({
+    const msgId = crypto.randomUUID();
+    this.#markSeen(msgId); // Prevent re-processing if flooded back to us
+
+    const str = JSON.stringify(/** @type {RelayAnswerMessage} */({
       type: 'RELAY_ANSWER',
+      msgId,
       from: this.#myId,
       to: message.from,
       sdp: answerSdp,
     }));
+    for (const p of this.#peers.values()) {
+      p.peerConnection.sendData(str);
+    }
   }
 
   /** @param {RelayAnswerMessage} message */
@@ -377,6 +558,6 @@ export class PeerMesh {
     this.#pendingOut.delete(message.from);
 
     await pending.acceptAnswer(message.sdp);
-    this.#registerPeer(message.from, pending.name, pending.peerConnection, false);
+    this.#registerPeer(message.from, pending.name, pending.peerConnection);
   }
 }
