@@ -20,7 +20,7 @@ export function describe(desc, fn) {
 
 /**
  * @param {string} desc
- * @param {() => Promise<void>} fn
+ * @param {(() => Promise<void>) | (() => void)} fn
  */
 export function it(desc, fn) {
   const currentDescribeBlock = tests[tests.length - 1];

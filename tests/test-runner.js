@@ -2,14 +2,14 @@
 import { tests, TEST_TIMEOUT } from "./test-helpers.js";
 
 
-export async function runTests(onTestComplete) {
+export async function runTests(/** @type {unknown} */ _onTestComplete) {
   const startTime = Date.now();
   const testPromises = [];
 
   for (const test of tests) {
     for (const itBlock of test.itBlocks) {
       /** @type {Promise<{ testDesc: string; itDesc: string; passed: boolean; error?: any }> } */
-      const promise = new Promise(async (resolve, reject) => {
+      const promise = new Promise(async (resolve, _reject) => {
         let timer;
         try {
           await Promise.race([

@@ -5,8 +5,8 @@ import { PeerMesh } from "../src/app/mesh.js";
 
 /**
  * Helper to create a mesh peer with a message queue for easy testing
- * @param {string} id
- * @param {string} name
+ * @param {string} _id
+ * @param {string} _name
  * @returns {{
  *   mesh: PeerMesh,
  *   messages: Queue<{fromId: string, message: any}>,
@@ -15,7 +15,7 @@ import { PeerMesh } from "../src/app/mesh.js";
  *   remoteStreams: Queue<{peerId: string, stream: MediaStream}>
  * }}
  */
-function createTestPeer(id, name) {
+function createTestPeer(_id, _name) {
   /** @type {Queue<{fromId: string, message: any}>} */
   const messages = new Queue();
   /** @type {Queue<import('../src/app/mesh.js').ConnectedPeer>} */
@@ -38,6 +38,7 @@ function createTestPeer(id, name) {
     onRemoteStream: (peerId, stream) => {
       remoteStreams.push({ peerId, stream });
     },
+    onScreenShare: () => {},
   });
 
   return { mesh, messages, peers, disconnects, remoteStreams };
@@ -296,7 +297,7 @@ describe("PeerMesh", function () {
       error = err;
     }
     assert(error instanceof Error, "Expected error for empty token");
-    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+    assert(/** @type {Error} */ (error).message.includes('Invalid token'), `Expected clear error message, got: ${/** @type {Error} */ (error).message}`);
 
     // Try to accept with whitespace only
     error = null;
@@ -306,7 +307,7 @@ describe("PeerMesh", function () {
       error = err;
     }
     assert(error instanceof Error, "Expected error for whitespace-only token");
-    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+    assert(/** @type {Error} */ (error).message.includes('Invalid token'), `Expected clear error message, got: ${/** @type {Error} */ (error).message}`);
 
     // Try to accept with invalid base64
     error = null;
@@ -316,7 +317,7 @@ describe("PeerMesh", function () {
       error = err;
     }
     assert(error instanceof Error, "Expected error for invalid base64");
-    assert(error.message.includes('Invalid token'), `Expected clear error message, got: ${error.message}`);
+    assert(/** @type {Error} */ (error).message.includes('Invalid token'), `Expected clear error message, got: ${/** @type {Error} */ (error).message}`);
   });
 
   it("should exchange video tracks between two peers (both start camera before connect)", async function () {
@@ -373,7 +374,7 @@ describe("PeerMesh", function () {
     const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
 
     const a = async () => {
-      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+      const { mesh, peers } = createTestPeer("peer-a", "Alice");
 
       // Connect WITHOUT camera
       const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
@@ -431,7 +432,7 @@ describe("PeerMesh", function () {
     };
 
     const b = async () => {
-      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+      const { mesh, peers } = createTestPeer("peer-b", "Bob");
 
       // Connect WITHOUT camera
       const offerLink = await recvOffer();
@@ -496,6 +497,77 @@ describe("PeerMesh", function () {
     };
 
     await Promise.all([a(), b()]);
+  });
+
+  it("[repro] 3-peer mesh: relay B↔C should carry video/audio tracks", async function () {
+    const { send: sendOfferAB, recv: recvOfferAB } = barrierMsg();
+    const { send: sendAnswerAB, recv: recvAnswerAB } = barrierMsg();
+    const { send: sendOfferAC, recv: recvOfferAC } = barrierMsg();
+    const { send: sendAnswerAC, recv: recvAnswerAC } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-a", "Alice");
+      mesh.addLocalTracks(createFakeTracks());
+
+      const { offerLink: offerAB, acceptAnswer: acceptAnswerAB } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAB(offerAB);
+      const answerAB = await recvAnswerAB();
+      await acceptAnswerAB(answerAB);
+      await peers.recv(); // B connected
+
+      const { offerLink: offerAC, acceptAnswer: acceptAnswerAC } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAC(offerAC);
+      const answerAC = await recvAnswerAC();
+      await acceptAnswerAC(answerAC);
+      await peers.recv(); // C connected
+
+      // A should still see B's video (pre-existing connection not broken)
+      const streamFromB = remoteStreams.queue.find(s => s.peerId === "peer-b");
+      assert(!!streamFromB, "A should have received B's stream");
+      assert(/** @type {NonNullable<typeof streamFromB>} */ (streamFromB).stream.getTracks().length > 0, "B's stream should have tracks");
+    };
+
+    const b = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-b", "Bob");
+      mesh.addLocalTracks(createFakeTracks());
+
+      const offerAB = await recvOfferAB();
+      const answerAB = await mesh.acceptInvite(offerAB, "peer-b", "Bob");
+      await sendAnswerAB(answerAB);
+      await peers.recv(); // A connected
+
+      // Wait for relay B↔C to form
+      await peers.recv(); // C connected via relay
+
+      // B should see C's video via relay
+      const streamFromC = await remoteStreams.recv();
+      assertEq(streamFromC.peerId, "peer-c");
+      assert(streamFromC.stream.getTracks().length > 0, "C's stream should have tracks");
+
+      // B should still see A's video
+      const streamFromA = remoteStreams.queue.find(s => s.peerId === "peer-a");
+      assert(!!streamFromA, "B should have received A's stream");
+    };
+
+    const c = async () => {
+      const { mesh, peers, remoteStreams } = createTestPeer("peer-c", "Charlie");
+      mesh.addLocalTracks(createFakeTracks());
+
+      const offerAC = await recvOfferAC();
+      const answerAC = await mesh.acceptInvite(offerAC, "peer-c", "Charlie");
+      await sendAnswerAC(answerAC);
+      await peers.recv(); // A connected
+
+      // Wait for relay B↔C to form
+      await peers.recv(); // B connected via relay
+
+      // C should see B's video via relay
+      const streamFromB = await remoteStreams.recv();
+      assertEq(streamFromB.peerId, "peer-b");
+      assert(streamFromB.stream.getTracks().length > 0, "B's stream should have tracks");
+    };
+
+    await Promise.all([a(), b(), c()]);
   });
 
   it("should fire onPeerDisconnected when a peer closes its connection", async function () {
@@ -597,7 +669,7 @@ describe("PeerMesh", function () {
       // C should only receive the broadcast sentinel, not the targeted message
       const msg = await messages.recv();
       assertEq(msg.message.text, "sentinel");
-      assertEq(messages.queue.length, 0, "C should not have received the targeted message");
+      assert(messages.queue.length === 0, "C should not have received the targeted message");
     };
 
     await Promise.all([a(), b(), c()]);
