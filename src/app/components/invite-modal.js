@@ -1,7 +1,7 @@
 // @ts-check
 
 import { html, asComponent } from 'scaffold-html';
-import { dispatch } from '../state.js';
+import { submitAnswer, cancelInvite } from '../actions.js';
 import { cast } from '../utils.js';
 
 /** @import {AppState} from '../state.js' */
@@ -32,10 +32,6 @@ const InviteModal = asComponent({
 
     const copyLink = () => {
       if (props.offerLink) navigator.clipboard.writeText(props.offerLink);
-    };
-
-    const submitAnswer = () => {
-      dispatch('submitAnswer', this.state.answerDraft);
     };
 
     return html`
@@ -69,9 +65,9 @@ const InviteModal = asComponent({
             ${props.inviteError ? html`<p class="error-msg">${props.inviteError}</p>` : ''}
           </div>
           <footer>
-            <button onclick=${() => dispatch('cancelInvite')}>Cancel</button>
+            <button onclick=${() => cancelInvite()}>Cancel</button>
             <button
-              onclick=${submitAnswer}
+              onclick=${() => submitAnswer(this.state.answerDraft)}
               disabled=${!this.state.answerDraft.trim()}
             >Connect</button>
           </footer>

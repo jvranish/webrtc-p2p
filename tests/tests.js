@@ -1,6 +1,6 @@
 // @ts-check
 import { Queue } from "./utils/queue.js";
-import { assert, assertEq, assertDeepEq, barrierMsg, describe, it } from "./test-helpers.js";
+import { assert, assertEq, assertDeepEq, barrier, barrierMsg, describe, it } from "./test-helpers.js";
 import { PeerMesh } from "../src/app/mesh.js";
 
 /**
@@ -10,7 +10,7 @@ import { PeerMesh } from "../src/app/mesh.js";
  * @returns {{
  *   mesh: PeerMesh,
  *   messages: Queue<{fromId: string, message: any}>,
- *   peers: Queue<{id: string, name: string}>,
+ *   peers: Queue<import('../src/app/mesh.js').ConnectedPeer>,
  *   disconnects: Queue<string>,
  *   remoteStreams: Queue<{peerId: string, stream: MediaStream}>
  * }}
@@ -18,7 +18,7 @@ import { PeerMesh } from "../src/app/mesh.js";
 function createTestPeer(id, name) {
   /** @type {Queue<{fromId: string, message: any}>} */
   const messages = new Queue();
-  /** @type {Queue<{id: string, name: string}>} */
+  /** @type {Queue<import('../src/app/mesh.js').ConnectedPeer>} */
   const peers = new Queue();
   /** @type {Queue<string>} */
   const disconnects = new Queue();
@@ -27,7 +27,7 @@ function createTestPeer(id, name) {
 
   const mesh = new PeerMesh({
     onPeerConnected: (peer) => {
-      peers.push({ id: peer.id, name: peer.name });
+      peers.push(peer);
     },
     onPeerDisconnected: (peerId) => {
       disconnects.push(peerId);
@@ -496,5 +496,225 @@ describe("PeerMesh", function () {
     };
 
     await Promise.all([a(), b()]);
+  });
+
+  it("should fire onPeerDisconnected when a peer closes its connection", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers, disconnects } = createTestPeer("peer-a", "Alice");
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+
+      const connectedPeer = await peers.recv();
+      assertEq(connectedPeer.id, "peer-b");
+
+      // Close A's side of the connection to B
+      connectedPeer.peerConnection.close();
+
+      // A should detect its own connection closed
+      const disconnectedId = await disconnects.recv();
+      assertEq(disconnectedId, "peer-b");
+    };
+
+    const b = async () => {
+      const { mesh, peers, disconnects } = createTestPeer("peer-b", "Bob");
+      const offerLink = await recvOffer();
+      const answerToken = await mesh.acceptInvite(offerLink, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+
+      await peers.recv(); // wait for A to connect
+
+      // B should detect that A's side closed
+      const disconnectedId = await disconnects.recv();
+      assertEq(disconnectedId, "peer-a");
+    };
+
+    await Promise.all([a(), b()]);
+  });
+
+  it("should deliver send() only to the target peer, not others", async function () {
+    const { send: sendOfferAB, recv: recvOfferAB } = barrierMsg();
+    const { send: sendAnswerAB, recv: recvAnswerAB } = barrierMsg();
+    const { send: sendOfferAC, recv: recvOfferAC } = barrierMsg();
+    const { send: sendAnswerAC, recv: recvAnswerAC } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers } = createTestPeer("peer-a", "Alice");
+
+      const { offerLink: offerAB, acceptAnswer: acceptAnswerAB } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAB(offerAB);
+      const answerAB = await recvAnswerAB();
+      await acceptAnswerAB(answerAB);
+      await peers.recv(); // B connected
+
+      const { offerLink: offerAC, acceptAnswer: acceptAnswerAC } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAC(offerAC);
+      const answerAC = await recvAnswerAC();
+      await acceptAnswerAC(answerAC);
+      await peers.recv(); // C connected
+
+      await new Promise(resolve => setTimeout(resolve, 500)); // let relay B↔C form
+
+      // Send targeted to B only, then broadcast a sentinel
+      mesh.send("peer-b", { type: 'CHAT', text: 'direct to Bob', timestamp: 0 });
+      mesh.broadcast({ type: 'CHAT', text: 'sentinel', timestamp: 0 });
+    };
+
+    const b = async () => {
+      const { mesh, peers, messages } = createTestPeer("peer-b", "Bob");
+
+      const offerAB = await recvOfferAB();
+      const answerAB = await mesh.acceptInvite(offerAB, "peer-b", "Bob");
+      await sendAnswerAB(answerAB);
+      await peers.recv(); // A connected
+      await peers.recv(); // C connected (relay)
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // B should receive both: the targeted message and the broadcast (order not guaranteed)
+      const bTexts = [
+        (await messages.recv()).message.text,
+        (await messages.recv()).message.text,
+      ].sort();
+      assertDeepEq(bTexts, ["direct to Bob", "sentinel"]);
+    };
+
+    const c = async () => {
+      const { mesh, peers, messages } = createTestPeer("peer-c", "Charlie");
+
+      const offerAC = await recvOfferAC();
+      const answerAC = await mesh.acceptInvite(offerAC, "peer-c", "Charlie");
+      await sendAnswerAC(answerAC);
+      await peers.recv(); // A connected
+      await peers.recv(); // B connected (relay)
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // C should only receive the broadcast sentinel, not the targeted message
+      const msg = await messages.recv();
+      assertEq(msg.message.text, "sentinel");
+      assertEq(messages.queue.length, 0, "C should not have received the targeted message");
+    };
+
+    await Promise.all([a(), b(), c()]);
+  });
+
+  it("should accept an offer given as raw base64 (not a URL)", async function () {
+    const { send: sendOffer, recv: recvOffer } = barrierMsg();
+    const { send: sendAnswer, recv: recvAnswer } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers } = createTestPeer("peer-a", "Alice");
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOffer(offerLink);
+      const answerToken = await recvAnswer();
+      await acceptAnswer(answerToken);
+
+      const connectedPeer = await peers.recv();
+      assertEq(connectedPeer.id, "peer-b");
+    };
+
+    const b = async () => {
+      const { mesh, peers } = createTestPeer("peer-b", "Bob");
+      const offerLink = await recvOffer();
+
+      // Extract the raw base64 from the URL, bypassing the URL format
+      const rawToken = offerLink.split('#offer=')[1];
+      assert(!!rawToken, "Expected raw token to be extractable from offer link");
+
+      const answerToken = await mesh.acceptInvite(rawToken, "peer-b", "Bob");
+      await sendAnswer(answerToken);
+
+      const connectedPeer = await peers.recv();
+      assertEq(connectedPeer.id, "peer-a");
+    };
+
+    await Promise.all([a(), b()]);
+  });
+
+  it("should form a 4-peer full mesh (stresses simultaneous relay offer handling)", async function () {
+    const { send: sendOfferAB, recv: recvOfferAB } = barrierMsg();
+    const { send: sendAnswerAB, recv: recvAnswerAB } = barrierMsg();
+    const { send: sendOfferAC, recv: recvOfferAC } = barrierMsg();
+    const { send: sendAnswerAC, recv: recvAnswerAC } = barrierMsg();
+    const { send: sendOfferAD, recv: recvOfferAD } = barrierMsg();
+    const { send: sendAnswerAD, recv: recvAnswerAD } = barrierMsg();
+    // B signals after it gets both relay connections; C and D wait to stay alive
+    const bConnectedBarrier = barrier(3);
+
+    const a = async () => {
+      const { mesh, peers } = createTestPeer("peer-a", "Alice");
+
+      const { offerLink: offerAB, acceptAnswer: acceptAnswerAB } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAB(offerAB);
+      const answerAB = await recvAnswerAB();
+      await acceptAnswerAB(answerAB);
+
+      const { offerLink: offerAC, acceptAnswer: acceptAnswerAC } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAC(offerAC);
+      const answerAC = await recvAnswerAC();
+      await acceptAnswerAC(answerAC);
+
+      const { offerLink: offerAD, acceptAnswer: acceptAnswerAD } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAD(offerAD);
+      const answerAD = await recvAnswerAD();
+      await acceptAnswerAD(answerAD);
+
+      const connectedIds = [
+        (await peers.recv()).id,
+        (await peers.recv()).id,
+        (await peers.recv()).id,
+      ].sort();
+      assertDeepEq(connectedIds, ["peer-b", "peer-c", "peer-d"]);
+    };
+
+    const b = async () => {
+      const { mesh, peers } = createTestPeer("peer-b", "Bob");
+
+      const offerAB = await recvOfferAB();
+      const answerAB = await mesh.acceptInvite(offerAB, "peer-b", "Bob");
+      await sendAnswerAB(answerAB);
+
+      // B should relay-connect to C and D simultaneously — this is the key scenario
+      const connectedIds = [
+        (await peers.recv()).id,
+        (await peers.recv()).id,
+        (await peers.recv()).id,
+      ].sort();
+      assertDeepEq(connectedIds, ["peer-a", "peer-c", "peer-d"]);
+      await bConnectedBarrier(); // signal C and D to stop waiting
+    };
+
+    // C and D only need to verify their direct connection to A and stay alive
+    // long enough for B to complete its relay connections through them.
+    const c = async () => {
+      const { mesh, peers } = createTestPeer("peer-c", "Charlie");
+
+      const offerAC = await recvOfferAC();
+      const answerAC = await mesh.acceptInvite(offerAC, "peer-c", "Charlie");
+      await sendAnswerAC(answerAC);
+
+      const peerA = await peers.recv();
+      assertEq(peerA.id, "peer-a");
+      await bConnectedBarrier(); // keep C alive until B's relays are done
+    };
+
+    const d = async () => {
+      const { mesh, peers } = createTestPeer("peer-d", "Dave");
+
+      const offerAD = await recvOfferAD();
+      const answerAD = await mesh.acceptInvite(offerAD, "peer-d", "Dave");
+      await sendAnswerAD(answerAD);
+
+      const peerA = await peers.recv();
+      assertEq(peerA.id, "peer-a");
+      await bConnectedBarrier(); // keep D alive until B's relays are done
+    };
+
+    await Promise.all([a(), b(), c(), d()]);
   });
 });

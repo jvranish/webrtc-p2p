@@ -2,6 +2,7 @@
 
 import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
+import { setName, startMedia, toggleScreenShare, startInvite, toggleSettings } from '../actions.js';
 import { cast } from '../utils.js';
 import { ChatPanel } from './chat-panel.js';
 import { InviteModal } from './invite-modal.js';
@@ -75,7 +76,7 @@ const SelfTile = asComponent({
             aria-label="Your display name"
             onchange=${(/** @type {Event} */ e) => {
               const input = cast(HTMLInputElement, e.target);
-              if (input.value.trim()) dispatch('setName', input.value.trim());
+              if (input.value.trim()) setName(input.value.trim());
             }}
           >
         </div>
@@ -131,7 +132,7 @@ const EmptyState = (state) => html`
 const Toolbar = (state) => html`
   <div class="toolbar">
     ${!state.localStream
-      ? html`<button onclick=${() => dispatch('startMedia')}>Start Camera</button>`
+      ? html`<button onclick=${() => startMedia()}>Start Camera</button>`
       : html`
         <button
           class=${state.audioEnabled ? 'active' : ''}
@@ -147,11 +148,11 @@ const Toolbar = (state) => html`
     }
     <button
       class=${state.screenShareActive ? 'active' : ''}
-      onclick=${() => dispatch('toggleScreenShare')}
+      onclick=${() => toggleScreenShare()}
       title=${state.screenShareActive ? 'Stop Sharing' : 'Share Screen'}
     >${state.screenShareActive ? '🖥️✓' : '🖥️'}</button>
     <button
-      onclick=${() => dispatch('startInvite')}
+      onclick=${() => startInvite()}
       disabled=${state.invitePhase !== 'idle'}
     >Invite</button>
     <button
@@ -160,7 +161,7 @@ const Toolbar = (state) => html`
     >Chat ${state.messages.length > 0 ? html`<span class="badge">${state.messages.length}</span>` : ''}</button>
     <button
       class=${state.settingsOpen ? 'active' : ''}
-      onclick=${() => dispatch('toggleSettings')}
+      onclick=${() => toggleSettings()}
       title="Settings"
     >⚙️</button>
   </div>

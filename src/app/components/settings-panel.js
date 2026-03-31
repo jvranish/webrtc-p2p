@@ -1,7 +1,7 @@
 // @ts-check
 
 import { html } from 'scaffold-html';
-import { dispatch } from '../state.js';
+import { toggleSettings, switchAudioDevice, switchVideoDevice } from '../actions.js';
 import { cast } from '../utils.js';
 
 /** @import {AppState} from '../state.js' */
@@ -14,11 +14,11 @@ export const SettingsPanel = (state) => {
   if (!state.settingsOpen) return '';
 
   return html`
-    <div class="modal-overlay" onclick=${() => dispatch('toggleSettings')}>
+    <div class="modal-overlay" onclick=${() => toggleSettings()}>
       <div class="modal" onclick=${(/** @type {Event} */ e) => e.stopPropagation()}>
         <div class="modal-header">
           <h2>Settings</h2>
-          <button class="close-btn" onclick=${() => dispatch('toggleSettings')}>×</button>
+          <button class="close-btn" onclick=${() => toggleSettings()}>×</button>
         </div>
         <div class="modal-body settings-body">
           <div class="settings-section">
@@ -27,7 +27,7 @@ export const SettingsPanel = (state) => {
               id="audio-device-select"
               onchange=${(/** @type {Event} */ e) => {
                 const select = cast(HTMLSelectElement, e.target);
-                dispatch('switchAudioDevice', select.value);
+                switchAudioDevice(select.value);
               }}
               disabled=${!state.localStream}
             >
@@ -50,7 +50,7 @@ export const SettingsPanel = (state) => {
               id="video-device-select"
               onchange=${(/** @type {Event} */ e) => {
                 const select = cast(HTMLSelectElement, e.target);
-                dispatch('switchVideoDevice', select.value);
+                switchVideoDevice(select.value);
               }}
               disabled=${!state.localStream || state.screenShareActive}
             >

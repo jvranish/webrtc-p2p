@@ -292,7 +292,10 @@ export class PeerMesh {
   #parseToken(input) {
     const trimmed = input.trim();
     const hashIdx = trimmed.indexOf('#');
-    const fragment = hashIdx === -1 ? trimmed : trimmed.slice(hashIdx + 1);
+    if (hashIdx === -1) {
+      return /** @type {TokenData} */ (decodeToken(trimmed));
+    }
+    const fragment = trimmed.slice(hashIdx + 1);
     const eqIdx = fragment.indexOf('=');
     const raw = eqIdx === -1 ? fragment : fragment.slice(eqIdx + 1);
     return /** @type {TokenData} */ (decodeToken(raw));

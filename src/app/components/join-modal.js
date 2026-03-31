@@ -2,6 +2,7 @@
 
 import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
+import { handleOffer } from '../actions.js';
 import { cast } from '../utils.js';
 
 /** @import {AppState} from '../state.js' */
@@ -71,7 +72,7 @@ const JoinButton = asComponent({
   render(props) {
     const open = () => {
       if (this.state.offerDraft.trim()) {
-        dispatch('handleOffer', this.state.offerDraft);
+        handleOffer(this.state.offerDraft);
       }
     };
 

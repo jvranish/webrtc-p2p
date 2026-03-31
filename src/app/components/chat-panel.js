@@ -2,6 +2,7 @@
 
 import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
+import { sendChat } from '../actions.js';
 import { cast } from '../utils.js';
 
 /** @import {AppState} from '../state.js' */
@@ -24,7 +25,7 @@ const ChatPanel = asComponent({
 
     const submit = () => {
       if (!this.state.draft.trim()) return;
-      dispatch('sendChat', this.state.draft);
+      sendChat(this.state.draft);
       this.update(s => { s.draft = ''; });
     };
 
