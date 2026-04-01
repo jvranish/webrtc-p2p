@@ -87,7 +87,6 @@ export class PeerConnection {
       this.#callbacks.onConnectionStateChange?.(this.#connection.connectionState);
 
       if (this.#connection.connectionState === 'failed' ||
-          this.#connection.connectionState === 'disconnected' ||
           this.#connection.connectionState === 'closed') {
         this.#callbacks.onDisconnected?.();
       }
@@ -97,8 +96,7 @@ export class PeerConnection {
     this.#connection.addEventListener('iceconnectionstatechange', () => {
       this.#callbacks.onIceConnectionStateChange?.(this.#connection.iceConnectionState);
 
-      if (this.#connection.iceConnectionState === 'failed' ||
-          this.#connection.iceConnectionState === 'disconnected') {
+      if (this.#connection.iceConnectionState === 'failed') {
         this.#callbacks.onDisconnected?.();
       }
     });
