@@ -97,6 +97,14 @@ export class PeerMesh {
     this.#callbacks = callbacks;
   }
 
+  /** Log the current known topology in a readable format. */
+  #logTopology() {
+    const rows = [...this.#topology.values()].map(e =>
+      `  ${e.id === this.#myId ? '*' : ' '}${e.id.slice(0, 8)} "${e.name}" v${e.version} → [${e.neighbors.map(n => n.slice(0, 8)).join(', ')}]`
+    );
+    console.log(`[mesh] topology (${this.#topology.size} known, ${this.#peers.size} connected):\n${rows.join('\n')}`);
+  }
+
   /**
    * Create an offer token for a new peer to use when joining.
    * @param {string} myId
@@ -107,6 +115,8 @@ export class PeerMesh {
     this.#myId = myId;
     this.#myName = myName;
     this.#updateMyEntry();
+
+    console.log(`[mesh] createInvite: myId=${myId.slice(0, 8)} name="${myName}"`);
 
     // Note: peerId not known yet, will be set when answer arrives
     const peerConnection = this.#createPeerConnection('pending');
@@ -123,6 +133,8 @@ export class PeerMesh {
 
     const acceptAnswer = async (/** @type {string} */ input) => {
       const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
+
+      console.log(`[mesh] acceptAnswer: peer=${answerData.peerId.slice(0, 8)} name="${answerData.name}"`);
 
       // Update the peer ID reference before setting remote description
       // so that any ontrack events that fire will have the correct peer ID
@@ -152,6 +164,7 @@ export class PeerMesh {
     this.#updateMyEntry();
 
     const offerData = this.#parseToken(offerInput);
+    console.log(`[mesh] acceptInvite: myId=${myId.slice(0, 8)} name="${myName}" offerFrom=${offerData.peerId.slice(0, 8)} name="${offerData.name}"`);
     const peerConnection = this.#createPeerConnection(offerData.peerId, () => {
       this.#registerPeer(offerData.peerId, offerData.name, peerConnection);
     });
@@ -398,6 +411,8 @@ export class PeerMesh {
   #registerPeer(id, name, peerConnection) {
     if (this.#peers.has(id)) return; // already connected (shouldn't happen, but guard it)
 
+    console.log(`[mesh] peer connected: ${id.slice(0, 8)} "${name}"`);
+
     /** @type {ConnectedPeer} */
     const peer = { id, name, peerConnection };
     this.#peers.set(id, peer);
@@ -424,12 +439,14 @@ export class PeerMesh {
       }
     }
 
+    this.#logTopology();
     this.#startAntiEntropy();
   }
 
   /** @param {string} peerId */
   #handlePeerDisconnected(peerId) {
     if (!this.#peers.has(peerId)) return;
+    console.log(`[mesh] peer disconnected: ${peerId.slice(0, 8)}`);
     this.#peers.delete(peerId);
     this.#callbacks.onPeerDisconnected(peerId);
 
@@ -442,6 +459,7 @@ export class PeerMesh {
     for (const p of this.#peers.values()) {
       p.peerConnection.sendData(updateMsg);
     }
+    this.#logTopology();
   }
 
   /**
@@ -454,6 +472,7 @@ export class PeerMesh {
     if (message.type === 'TOPOLOGY') {
       const updated = this.#mergeTopology(message.entries);
       if (updated.length > 0) {
+        console.log(`[mesh] TOPOLOGY from ${fromId.slice(0, 8)}: merged ${updated.length} new/updated entries`);
         // Fan-out newly-learned entries to all other peers (same as TOPOLOGY_UPDATE)
         for (const entry of updated) {
           const str = JSON.stringify(/** @type {TopologyUpdateMessage} */({ type: 'TOPOLOGY_UPDATE', entry }));
@@ -462,22 +481,27 @@ export class PeerMesh {
           }
         }
         this.#checkForNewPeers();
+        this.#logTopology();
       }
     } else if (message.type === 'TOPOLOGY_UPDATE') {
       const updated = this.#mergeTopology([message.entry]);
       if (updated.length > 0) {
+        console.log(`[mesh] TOPOLOGY_UPDATE from ${fromId.slice(0, 8)}: ${message.entry.id.slice(0, 8)} "${message.entry.name}" v${message.entry.version} neighbors=[${message.entry.neighbors.map(n => n.slice(0, 8)).join(', ')}]`);
         // Fan-out: re-gossip to all peers except the sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
           if (p.id !== fromId) p.peerConnection.sendData(str);
         }
         this.#checkForNewPeers();
+        this.#logTopology();
       }
     } else if (message.type === 'RELAY_OFFER') {
       if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
+        console.log(`[mesh] RELAY_OFFER for me from ${message.from.slice(0, 8)} "${message.name}"`);
         this.#handleRelayOffer(message).catch(err => console.error('PeerMesh: handleRelayOffer failed', err));
       } else {
+        console.log(`[mesh] RELAY_OFFER relay: ${message.from.slice(0, 8)} → ${message.to.slice(0, 8)}`);
         // Flood to all peers except sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
@@ -487,8 +511,10 @@ export class PeerMesh {
     } else if (message.type === 'RELAY_ANSWER') {
       if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
+        console.log(`[mesh] RELAY_ANSWER for me from ${message.from.slice(0, 8)}`);
         this.#handleRelayAnswer(message).catch(err => console.error('PeerMesh: handleRelayAnswer failed', err));
       } else {
+        console.log(`[mesh] RELAY_ANSWER relay: ${message.from.slice(0, 8)} → ${message.to.slice(0, 8)}`);
         // Flood to all peers except sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
@@ -508,6 +534,7 @@ export class PeerMesh {
     if (this.#peers.has(targetId)) return;
     if (this.#pendingOut.has(targetId)) return;
 
+    console.log(`[mesh] initiating relay connection to ${targetId.slice(0, 8)} "${targetName}"`);
     const peerConnection = this.#createPeerConnection(targetId);
 
     const { offerSdp, acceptAnswer } = await peerConnection.createInvite();
@@ -531,7 +558,10 @@ export class PeerMesh {
 
   /** @param {RelayOfferMessage} message */
   async #handleRelayOffer(message) {
-    if (this.#peers.has(message.from)) return; // already connected
+    if (this.#peers.has(message.from)) {
+      console.log(`[mesh] RELAY_OFFER from ${message.from.slice(0, 8)}: already connected, ignoring`);
+      return; // already connected
+    }
 
     const peerConnection = this.#createPeerConnection(message.from, () => {
       this.#registerPeer(message.from, message.name, peerConnection);
@@ -557,7 +587,10 @@ export class PeerMesh {
   /** @param {RelayAnswerMessage} message */
   async #handleRelayAnswer(message) {
     const pending = this.#pendingOut.get(message.from);
-    if (!pending) return;
+    if (!pending) {
+      console.warn(`[mesh] RELAY_ANSWER from ${message.from.slice(0, 8)}: no pending connection, ignoring`);
+      return;
+    }
     this.#pendingOut.delete(message.from);
 
     await pending.acceptAnswer(message.sdp);
