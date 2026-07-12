@@ -111,6 +111,7 @@ export class AppState {
       existing.name = peer.name;
     } else {
       this.peers.set(peer.id, { id: peer.id, name: peer.name, stream: null });
+      if (this.pinnedPeerId === null) this.pinnedPeerId = peer.id;
     }
     if (this.joinPhase === 'showing-answer') this.closeJoinModal();
   }

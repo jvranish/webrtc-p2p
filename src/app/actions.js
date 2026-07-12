@@ -13,7 +13,6 @@ const mesh = new PeerMesh({
   onPeerDisconnected: (id) => dispatch('peerDisconnected', id),
   onMessage: (fromId, msg) => onMessage(fromId, msg),
   onRemoteStream: (peerId, stream) => dispatch('setPeerStream', peerId, stream),
-  onScreenShare: (_peerId, _active) => {},
 });
 
 /**

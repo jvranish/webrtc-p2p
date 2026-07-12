@@ -45,7 +45,6 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(peerId: string) => void} onPeerDisconnected
  * @property {(fromId: string, message: MeshMessage) => void} onMessage
  * @property {(peerId: string, stream: MediaStream) => void} onRemoteStream
- * @property {(peerId: string, active: boolean) => void} onScreenShare
  */
 
 export class PeerMesh {
@@ -386,7 +385,7 @@ export class PeerMesh {
 
   /**
    * Start a 30-second anti-entropy interval that re-gossips our own topology entry.
-   * This heals any divergence caused by dropped TOPOLOGY_UPDATE messages.
+   * This heals any divergence caused by dropped j messages.
    */
   #startAntiEntropy() {
     if (this.#antiEntropyInterval !== undefined) return;

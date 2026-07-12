@@ -4,8 +4,6 @@
  * @typedef {Object} PeerConnectionCallbacks
  * @property {(stream: MediaStream) => void} [onRemoteStream] - Called when a remote media stream is received
  * @property {() => void} [onDisconnected] - Called when the connection is lost
- * @property {(state: RTCPeerConnectionState) => void} [onConnectionStateChange] - Called when connection state changes
- * @property {(state: RTCIceConnectionState) => void} [onIceConnectionStateChange] - Called when ICE connection state changes
  * @property {() => void} [onDataChannelOpen] - Called when the data channel is open and ready
  * @property {(data: string) => void} [onDataChannelMessage] - Called when a message is received on the data channel
  */
@@ -84,8 +82,6 @@ export class PeerConnection {
 
     // Handle connection state changes
     this.#connection.addEventListener('connectionstatechange', () => {
-      this.#callbacks.onConnectionStateChange?.(this.#connection.connectionState);
-
       if (this.#connection.connectionState === 'failed' ||
           this.#connection.connectionState === 'closed') {
         this.#callbacks.onDisconnected?.();
@@ -94,8 +90,6 @@ export class PeerConnection {
 
     // Handle ICE connection state changes
     this.#connection.addEventListener('iceconnectionstatechange', () => {
-      this.#callbacks.onIceConnectionStateChange?.(this.#connection.iceConnectionState);
-
       if (this.#connection.iceConnectionState === 'failed') {
         this.#callbacks.onDisconnected?.();
       }
@@ -120,6 +114,7 @@ export class PeerConnection {
     this.#dataChannel = channel;
 
     channel.addEventListener('open', () => {
+      this.#isConnected = true;
       this.#callbacks.onDataChannelOpen?.();
     });
 
@@ -268,8 +263,6 @@ export class PeerConnection {
    */
   async #setRemoteDescription(description) {
     await this.#connection.setRemoteDescription(description);
-    // Mark as connected after setting remote description (initial negotiation complete)
-    this.#isConnected = true;
   }
 
   /**

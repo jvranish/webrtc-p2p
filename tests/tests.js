@@ -38,7 +38,6 @@ function createTestPeer(_id, _name) {
     onRemoteStream: (peerId, stream) => {
       remoteStreams.push({ peerId, stream });
     },
-    onScreenShare: () => {},
   });
 
   return { mesh, messages, peers, disconnects, remoteStreams };
@@ -706,6 +705,73 @@ describe("PeerMesh", function () {
     };
 
     await Promise.all([a(), b()]);
+  });
+
+  it("should form a 3-peer mesh via chain: A invites B, then B invites C", async function () {
+    // Topology: A↔B (direct), B↔C (direct), A↔C (relay through B via gossip)
+    const { send: sendOfferAB, recv: recvOfferAB } = barrierMsg();
+    const { send: sendAnswerAB, recv: recvAnswerAB } = barrierMsg();
+    const { send: sendOfferBC, recv: recvOfferBC } = barrierMsg();
+    const { send: sendAnswerBC, recv: recvAnswerBC } = barrierMsg();
+
+    const a = async () => {
+      const { mesh, peers } = createTestPeer("peer-a", "Alice");
+
+      const { offerLink, acceptAnswer } = await mesh.createInvite("peer-a", "Alice");
+      await sendOfferAB(offerLink);
+      const answerAB = await recvAnswerAB();
+      await acceptAnswer(answerAB);
+
+      // A↔B connected
+      const peerB = await peers.recv();
+      assertEq(peerB.id, "peer-b");
+
+      // A should relay-connect to C once B gossips C's topology entry to A
+      const peerC = await peers.recv();
+      assertEq(peerC.id, "peer-c");
+    };
+
+    const b = async () => {
+      const { mesh, peers } = createTestPeer("peer-b", "Bob");
+
+      // B accepts invite from A
+      const offerAB = await recvOfferAB();
+      const answerAB = await mesh.acceptInvite(offerAB, "peer-b", "Bob");
+      await sendAnswerAB(answerAB);
+
+      // A↔B connected
+      const peerA = await peers.recv();
+      assertEq(peerA.id, "peer-a");
+
+      // B now invites C
+      const { offerLink: offerBC, acceptAnswer: acceptAnswerBC } = await mesh.createInvite("peer-b", "Bob");
+      await sendOfferBC(offerBC);
+      const answerBC = await recvAnswerBC();
+      await acceptAnswerBC(answerBC);
+
+      // B↔C connected
+      const peerC = await peers.recv();
+      assertEq(peerC.id, "peer-c");
+    };
+
+    const c = async () => {
+      const { mesh, peers } = createTestPeer("peer-c", "Charlie");
+
+      // C accepts invite from B
+      const offerBC = await recvOfferBC();
+      const answerBC = await mesh.acceptInvite(offerBC, "peer-c", "Charlie");
+      await sendAnswerBC(answerBC);
+
+      // B↔C connected
+      const peerB = await peers.recv();
+      assertEq(peerB.id, "peer-b");
+
+      // C should relay-connect to A via gossip (B sent C the full topology including A)
+      const peerA = await peers.recv();
+      assertEq(peerA.id, "peer-a");
+    };
+
+    await Promise.all([a(), b(), c()]);
   });
 
   it("should form a 4-peer full mesh (stresses simultaneous relay offer handling)", async function () {
