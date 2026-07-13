@@ -235,9 +235,18 @@ flowchart TD
 ```
 
 **Anti-Entropy (Healing):**
-- Automatic re-gossip every 30 seconds (starts after first peer connects)
-- Sends full `TOPOLOGY_UPDATE` of this peer's entry to all neighbors
+- Every 30 seconds (starts after first peer connects): sends a full `TOPOLOGY` snapshot to all neighbors, prunes departed peers, and retries missing connections
+- Receivers merge the snapshot and fan out anything they were missing, so it heals third-party divergence, not just this peer's own entry
 - Recovers from message loss that may have silently dropped topology updates
+
+**Relay timeout & retry:**
+- Each outgoing relay offer has a timeout (20s); on expiry the attempt is cancelled and retried, up to 3 attempts (reset when the target gossips a newer entry)
+- `RELAY_ANSWER` carries `replyTo` (the offer's `msgId`); answers to abandoned offers are ignored so a late answer can't corrupt a newer attempt
+
+**Departed-peer pruning:**
+- A peer's own topology entry can only be updated by its owner, so entries of departed peers linger
+- Entries with no mutual-edge path from this peer (both sides list each other) are marked unreachable; if still unreachable after a 90s grace period they are pruned
+- The grace period covers transient asymmetry while gossip converges (e.g. a joining peer's entry arriving before its neighbor's updated entry)
 
 **State Tracking:**
 - Maintaining full topology allows decision-making about who should initiate relay connections
@@ -254,8 +263,8 @@ All messages are JSON strings sent over data channels.
 - `TOPOLOGY_UPDATE`: Single entry update (gossiped through mesh)
 
 **Relay Signaling:**
-- `RELAY_OFFER`: Offer for new connection, flooded to destination
-- `RELAY_ANSWER`: Answer response, flooded to sender
+- `RELAY_OFFER`: Offer for new connection, flooded to destination (`msgId` for dedup)
+- `RELAY_ANSWER`: Answer response, flooded back (`replyTo` = the offer's `msgId`, so stale answers are ignored)
 
 **Renegotiation (during existing connection):**
 - `RENEGOTIATE_OFFER`: SDP offer for track changes

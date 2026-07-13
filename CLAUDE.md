@@ -18,8 +18,8 @@ python -m http.server 5501
 # or
 npx http-server -p 5501
 
-# Type check
-npx --package typescript tsc --noEmit -p ./jsconfig.json
+# Type check (pinned: TS 7.x flags errors in vendored src/deps)
+npx --package typescript@5.9 tsc --noEmit -p ./jsconfig.json
 
 # Run tests (requires server running on port 5501)
 npx run-page http://localhost:5501/tests.html
@@ -33,7 +33,13 @@ Tests are in `tests/` directory and run in the browser via `tests.html`. The tes
 - `test-helpers.js` - Test framework (`describe`, `it`, assertions, barriers)
 - `test-runner.js` - Runs tests and displays results
 - `utils/queue.js` - Async queue for coordinating test messages
-- `tests.js` - Mesh connection tests covering full join flow and message exchange
+- `tests.js` - Mesh connection tests covering full join flow and message exchange (real WebRTC)
+- `fake-network.js` - Deterministic in-memory transport + virtual clock (drop/hold/sever fault injection, seeded interleaving, delivery trace)
+- `sim-tests.js` - Protocol race-condition tests running PeerMesh on the FakeNetwork; every schedule is reproducible, failures log the delivery trace
+
+The sim tests are DOM-free and can also run in Node for quick iteration
+(shim `globalThis.location`, import `tests/sim-tests.js`, run `tests` from
+test-helpers).
 
 Please run the tests after every major change.
 
@@ -59,20 +65,22 @@ Pure ES modules served directly. Import aliases are configured in two places tha
 1. Existing peer (A) generates an offer → shareable link `#offer=BASE64`
 2. New peer (C) opens link, creates answer → shows answer token
 3. A pastes answer token → A↔C data channel opens
-4. A sends C a `PEER_LIST` of all other peers via data channel
-5. C creates relay offers for each listed peer, sends via A's data channel
-6. A forwards relay offers; each peer responds with relay answers through A back to C
-7. C applies answers → full mesh formed (manual copy-paste only needed once)
+4. On connect, each side sends the other a full `TOPOLOGY` snapshot; entries are gossiped onward via `TOPOLOGY_UPDATE` (versioned, last-write-wins)
+5. For each known-but-unconnected peer pair, the lexicographically lower ID initiates a `RELAY_OFFER`, flooded through the mesh (deduped by `msgId`); the target floods back a `RELAY_ANSWER`
+6. Full mesh formed (manual copy-paste only needed once). A 30s anti-entropy interval re-gossips, prunes departed peers, and retries missing connections.
+
+See ARCHITECTURE.md for the full gossip/relay protocol.
 
 ### Data Channel Message Types
 ```
-PEER_LIST    — {peers: [{id, name}]}           sent after initial connection
-RELAY_OFFER  — {from, to, name, sdp}           routed blindly by `to` field
-RELAY_ANSWER — {from, to, sdp}                 routed blindly by `to` field
-PEER_META    — {name}                          name change broadcast
-PEER_LEFT    — {}                              graceful disconnect
-CHAT         — {text, timestamp}               chat message
-SCREEN_SHARE — {active}                        (Phase 4) track swap notification
+TOPOLOGY        — {entries: TopologyEntry[]}     full sync, sent on connect
+TOPOLOGY_UPDATE — {entry: TopologyEntry}         gossip, version LWW
+RELAY_OFFER     — {msgId, from, to, name, sdp}   flooded, deduped by msgId
+RELAY_ANSWER    — {msgId, from, to, sdp}         flooded, deduped by msgId
+PEER_META       — {name}                         name change broadcast
+CHAT            — {text, timestamp}              chat message
+SCREEN_SHARE    — {active}                       track swap notification (sent; receivers currently ignore)
+RENEGOTIATE_OFFER / RENEGOTIATE_ANSWER — {sdp}   per-connection, intercepted in Connection
 ```
 
 ## TypeScript/JSDoc Standards

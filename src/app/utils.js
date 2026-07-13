@@ -17,14 +17,22 @@ export function cast(Type, value) {
 }
 
 /**
+ * Encode an object as a URL-safe base64 token.
+ * UTF-8 encodes first (btoa alone throws on chars > U+00FF, e.g. non-Latin names),
+ * then uses the base64url alphabet so the token survives URL fragments unmangled.
  * @param {unknown} obj
  * @returns {string}
  */
 export function encodeToken(obj) {
-  return btoa(JSON.stringify(obj));
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 /**
+ * Decode a token produced by encodeToken. Accepts both base64url and
+ * standard base64 (with or without padding).
  * @param {string} encoded
  * @returns {unknown}
  */
@@ -33,11 +41,14 @@ export function decodeToken(encoded) {
     throw new Error('Invalid token: empty or whitespace-only');
   }
   try {
-    const decoded = atob(encoded.trim());
-    if (!decoded) {
+    let b64 = encoded.trim().replaceAll('-', '+').replaceAll('_', '/');
+    b64 += '='.repeat((4 - (b64.length % 4)) % 4);
+    const bin = atob(b64);
+    if (!bin) {
       throw new Error('Invalid token: decodes to empty string');
     }
-    return JSON.parse(decoded);
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch (err) {
     if (err instanceof Error && err.message.includes('Invalid token')) {
       throw err;

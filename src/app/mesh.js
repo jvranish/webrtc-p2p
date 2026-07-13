@@ -1,7 +1,46 @@
 // @ts-check
 
-import { startOffer, answerOffer, Connection } from './peer-connection.js';
+import { startOffer, answerOffer } from './peer-connection.js';
 import { encodeToken, decodeToken } from './utils.js';
+
+/**
+ * The connection surface PeerMesh needs. The real implementation is
+ * `Connection` from peer-connection.js; tests inject in-memory fakes.
+ * @typedef {Object} MeshConnection
+ * @property {(data: string) => boolean} sendData
+ * @property {(tracks: MediaStreamTrack[]) => void} addLocalTracks
+ * @property {(newTrack: MediaStreamTrack) => Promise<void>} replaceTrack
+ * @property {(kind: 'video' | 'audio') => Promise<void>} removeTrack
+ * @property {() => void} close
+ */
+
+/**
+ * Factory for outgoing/incoming connections (the WebRTC seam).
+ * Defaults to the real startOffer/answerOffer; tests inject a FakeNetwork
+ * transport to get deterministic, schedulable message delivery.
+ * @typedef {Object} MeshTransport
+ * @property {(callbacks?: import('./peer-connection.js').ConnectionCallbacks, rtcConfig?: RTCConfiguration, tracks?: MediaStreamTrack[]) => Promise<{offerSdp: string, acceptAnswer: (answerSdp: string) => Promise<MeshConnection>, cancel: () => void}>} startOffer
+ * @property {(offerSdp: string, callbacks?: import('./peer-connection.js').ConnectionCallbacks, rtcConfig?: RTCConfiguration, tracks?: MediaStreamTrack[]) => Promise<{answerSdp: string, waitForConnect: () => Promise<MeshConnection>}>} answerOffer
+ */
+
+/**
+ * Time source (the timer seam). Defaults to real timers; tests inject a
+ * virtual clock so timeouts and anti-entropy can be advanced deterministically.
+ * @typedef {Object} MeshClock
+ * @property {(fn: () => void, ms: number) => number} setTimeout
+ * @property {(id: number) => void} clearTimeout
+ * @property {(fn: () => void, ms: number) => number} setInterval
+ * @property {(id: number) => void} clearInterval
+ * @property {() => number} now
+ */
+
+/**
+ * @typedef {Object} MeshOptions
+ * @property {number} [relayTimeoutMs]
+ * @property {number} [antiEntropyMs]
+ * @property {number} [unreachableGraceMs]
+ * @property {MeshClock} [clock]
+ */
 
 /**
  * @typedef {Object} TokenData
@@ -15,7 +54,7 @@ import { encodeToken, decodeToken } from './utils.js';
  * @typedef {Object} ConnectedPeer
  * @property {string} id
  * @property {string} name
- * @property {Connection} connection
+ * @property {MeshConnection} connection
  */
 
 /**
@@ -31,13 +70,31 @@ import { encodeToken, decodeToken } from './utils.js';
  * @typedef {{ type: 'TOPOLOGY', entries: TopologyEntry[] }} TopologyMessage
  * @typedef {{ type: 'TOPOLOGY_UPDATE', entry: TopologyEntry }} TopologyUpdateMessage
  * @typedef {{ type: 'RELAY_OFFER', msgId: string, from: string, to: string, name: string, sdp: string }} RelayOfferMessage
- * @typedef {{ type: 'RELAY_ANSWER', msgId: string, from: string, to: string, sdp: string }} RelayAnswerMessage
+ * @typedef {{ type: 'RELAY_ANSWER', msgId: string, replyTo: string, from: string, to: string, sdp: string }} RelayAnswerMessage
  * @typedef {{ type: 'PEER_META', name: string }} PeerMetaMessage
- * @typedef {{ type: 'PEER_LEFT' }} PeerLeftMessage
  * @typedef {{ type: 'CHAT', text: string, timestamp: number }} ChatMessage
  * @typedef {{ type: 'SCREEN_SHARE', active: boolean }} ScreenShareMessage
- * @typedef {TopologyMessage | TopologyUpdateMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | PeerLeftMessage | ChatMessage | ScreenShareMessage} MeshMessage
+ * @typedef {TopologyMessage | TopologyUpdateMessage | RelayOfferMessage | RelayAnswerMessage | PeerMetaMessage | ChatMessage | ScreenShareMessage} MeshMessage
  */
+
+/**
+ * Mutable ref shared between a connection attempt and its callbacks.
+ * `peerId` may be updated once the remote identity is learned (offerer side);
+ * `discarded` is set when the attempt lost a duplicate-connection race, so its
+ * late events must not affect the winning connection.
+ * `connection` is set once this attempt's connection is registered in #peers;
+ * onDisconnected only tears down the peer if it is still the registered one.
+ * @typedef {{ peerId: string, discarded?: boolean, connection?: MeshConnection }} PeerIdRef
+ */
+
+/** @type {MeshClock} */
+const defaultClock = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (id) => clearTimeout(id),
+  setInterval: (fn, ms) => setInterval(fn, ms),
+  clearInterval: (id) => clearInterval(id),
+  now: () => Date.now(),
+};
 
 /**
  * @typedef {Object} MeshCallbacks
@@ -46,6 +103,11 @@ import { encodeToken, decodeToken } from './utils.js';
  * @property {(fromId: string, message: MeshMessage) => void} onMessage
  * @property {(peerId: string, stream: MediaStream) => void} onRemoteStream
  */
+
+const RELAY_TIMEOUT_MS = 20_000;
+const RELAY_MAX_ATTEMPTS = 3;
+const UNREACHABLE_GRACE_MS = 90_000;
+const ANTI_ENTROPY_MS = 30_000;
 
 export class PeerMesh {
   /** @type {string} */
@@ -59,9 +121,31 @@ export class PeerMesh {
 
   /**
    * Outgoing relay connections waiting for a RELAY_ANSWER.
-   * @type {Map<string, {name: string, acceptAnswer: (answerSdp: string) => Promise<Connection>}>}
+   * Each entry has a timeout; on expiry the attempt is cancelled and retried
+   * (up to RELAY_MAX_ATTEMPTS), so a lost relay message can't permanently
+   * block this peer pair from ever connecting. `msgId` is the offer's id;
+   * answers must echo it (replyTo) so a stale answer can't complete a newer attempt.
+   * @type {Map<string, {name: string, msgId: string, acceptAnswer: (answerSdp: string) => Promise<MeshConnection>, cancel: () => void, timer: number, peerIdRef: PeerIdRef}>}
    */
   #pendingOut = new Map();
+
+  /**
+   * Failed relay attempts per target peer. Reset when the target gossips a
+   * newer topology entry (proof it's alive with changed state).
+   * @type {Map<string, number>}
+   */
+  #relayAttempts = new Map();
+
+  /**
+   * Peers that look unreachable (no mutual-edge path from us in the topology),
+   * mapped to when we first noticed. Entries still unreachable after
+   * UNREACHABLE_GRACE_MS are pruned — this garbage-collects departed peers,
+   * whose own entries nobody is authoritative to update. The grace period
+   * covers transient asymmetry while gossip converges (e.g. a joining peer's
+   * entry arriving before its neighbor's updated entry).
+   * @type {Map<string, number>}
+   */
+  #unreachableSince = new Map();
 
   /** @type {MeshCallbacks} */
   #callbacks;
@@ -85,12 +169,46 @@ export class PeerMesh {
   /** @type {string[]} */
   #seenMsgIdQueue = [];
 
-  /** @type {ReturnType<typeof setInterval> | undefined} */
+  /** @type {number | undefined} */
   #antiEntropyInterval = undefined;
 
-  /** @param {MeshCallbacks} callbacks */
-  constructor(callbacks) {
+  /** @type {MeshTransport} */
+  #transport;
+
+  /** @type {MeshClock} */
+  #clock;
+
+  /** @type {number} */
+  #relayTimeoutMs;
+
+  /** @type {number} */
+  #antiEntropyMs;
+
+  /** @type {number} */
+  #unreachableGraceMs;
+
+  /**
+   * @param {MeshCallbacks} callbacks
+   * @param {MeshTransport} [transport] - connection factory; tests inject an in-memory fake
+   * @param {MeshOptions} [opts] - timing overrides and virtual clock for tests
+   */
+  constructor(callbacks, transport, opts) {
     this.#callbacks = callbacks;
+    this.#transport = transport ?? { startOffer, answerOffer };
+    this.#clock = opts?.clock ?? defaultClock;
+    this.#relayTimeoutMs = opts?.relayTimeoutMs ?? RELAY_TIMEOUT_MS;
+    this.#antiEntropyMs = opts?.antiEntropyMs ?? ANTI_ENTROPY_MS;
+    this.#unreachableGraceMs = opts?.unreachableGraceMs ?? UNREACHABLE_GRACE_MS;
+  }
+
+  /** IDs of currently connected peers (for tests and debugging). */
+  get connectedPeerIds() {
+    return [...this.#peers.keys()];
+  }
+
+  /** Deep copy of the known topology (for tests and debugging). */
+  topologySnapshot() {
+    return [...this.#topology.values()].map(e => ({ ...e, neighbors: [...e.neighbors] }));
   }
 
   /** Log the current known topology in a readable format. */
@@ -103,18 +221,26 @@ export class PeerMesh {
 
   /**
    * Build connection callbacks for a given peer.
-   * @param {{ peerId: string }} peerIdRef - mutable ref so offerer can update peerId after answer arrives
+   * @param {PeerIdRef} peerIdRef - mutable ref so offerer can update peerId after answer arrives
    * @returns {import('./peer-connection.js').ConnectionCallbacks}
    */
   #makeCallbacks(peerIdRef) {
     return {
       onRemoteStream: (stream) => {
+        if (peerIdRef.discarded) return;
         this.#callbacks.onRemoteStream(peerIdRef.peerId, stream);
       },
       onDisconnected: () => {
+        if (peerIdRef.discarded) return;
+        // Only tear down the peer if this attempt's connection is the one
+        // currently registered — a failing stale or duplicate attempt must
+        // not evict a live connection to the same peer.
+        const peer = this.#peers.get(peerIdRef.peerId);
+        if (!peer || peer.connection !== peerIdRef.connection) return;
         this.#handlePeerDisconnected(peerIdRef.peerId);
       },
       onMessage: (data) => {
+        if (peerIdRef.discarded) return;
         this.#handleMessage(peerIdRef.peerId, data);
       },
     };
@@ -133,8 +259,9 @@ export class PeerMesh {
 
     console.log(`[mesh] createInvite: myId=${myId.slice(0, 8)} name="${myName}"`);
 
+    /** @type {PeerIdRef} */
     const peerIdRef = { peerId: 'pending' };
-    const { offerSdp, acceptAnswer: acceptAnswerSdp } = await startOffer(
+    const { offerSdp, acceptAnswer: acceptAnswerSdp } = await this.#transport.startOffer(
       this.#makeCallbacks(peerIdRef),
       undefined,
       this.#localTracks,
@@ -158,7 +285,7 @@ export class PeerMesh {
       peerIdRef.peerId = answerData.peerId;
 
       const connection = await acceptAnswerSdp(answerData.sdp);
-      this.#registerPeer(answerData.peerId, answerData.name, connection);
+      this.#registerPeer(answerData.peerId, answerData.name, connection, peerIdRef);
     };
 
     return { offerLink, acceptAnswer };
@@ -180,8 +307,9 @@ export class PeerMesh {
     const offerData = this.#parseToken(offerInput);
     console.log(`[mesh] acceptInvite: myId=${myId.slice(0, 8)} name="${myName}" offerFrom=${offerData.peerId.slice(0, 8)} name="${offerData.name}"`);
 
+    /** @type {PeerIdRef} */
     const peerIdRef = { peerId: offerData.peerId };
-    const { answerSdp, waitForConnect } = await answerOffer(
+    const { answerSdp, waitForConnect } = await this.#transport.answerOffer(
       offerData.sdp,
       this.#makeCallbacks(peerIdRef),
       undefined,
@@ -190,7 +318,7 @@ export class PeerMesh {
 
     // Connection completes asynchronously when the data channel opens
     waitForConnect().then(connection => {
-      this.#registerPeer(offerData.peerId, offerData.name, connection);
+      this.#registerPeer(offerData.peerId, offerData.name, connection, peerIdRef);
     }).catch(err => console.error('PeerMesh: connection failed', err));
 
     const tokenData = /** @type {TokenData} */ ({
@@ -238,49 +366,24 @@ export class PeerMesh {
   }
 
   /**
-   * Replace the video track in all peer connections (for screen sharing).
-   * @param {MediaStreamTrack | null} newTrack - New video track, or null to remove video
+   * Replace (or remove) the track of a given kind in all peer connections
+   * (screen sharing, device switching).
+   * @param {'video' | 'audio'} kind
+   * @param {MediaStreamTrack | null} newTrack - New track, or null to remove
    * @returns {Promise<void>}
    */
-  async replaceVideoTrack(newTrack) {
+  async replaceTrack(kind, newTrack) {
     for (const peer of this.#peers.values()) {
       if (newTrack) {
         await peer.connection.replaceTrack(newTrack);
       } else {
-        await peer.connection.removeTrack('video');
+        await peer.connection.removeTrack(kind);
       }
     }
 
     // Update stored local tracks
-    if (newTrack) {
-      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
-      this.#localTracks.push(newTrack);
-    } else {
-      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'video');
-    }
-  }
-
-  /**
-   * Replace the audio track in all peer connections (for device switching).
-   * @param {MediaStreamTrack | null} newTrack - New audio track, or null to remove audio
-   * @returns {Promise<void>}
-   */
-  async replaceAudioTrack(newTrack) {
-    for (const peer of this.#peers.values()) {
-      if (newTrack) {
-        await peer.connection.replaceTrack(newTrack);
-      } else {
-        await peer.connection.removeTrack('audio');
-      }
-    }
-
-    // Update stored local tracks
-    if (newTrack) {
-      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
-      this.#localTracks.push(newTrack);
-    } else {
-      this.#localTracks = this.#localTracks.filter(t => t.kind !== 'audio');
-    }
+    this.#localTracks = this.#localTracks.filter(t => t.kind !== kind);
+    if (newTrack) this.#localTracks.push(newTrack);
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
@@ -332,10 +435,59 @@ export class PeerMesh {
       const existing = this.#topology.get(entry.id);
       if (!existing || entry.version > existing.version) {
         this.#topology.set(entry.id, entry);
+        // Fresh gossip from this peer proves it's alive: allow relay retries.
+        this.#relayAttempts.delete(entry.id);
         updated.push(entry);
       }
     }
+    if (updated.length > 0) this.#pruneTopology();
     return updated;
+  }
+
+  /**
+   * Garbage-collect topology entries for departed peers.
+   *
+   * A peer is considered reachable if there is a path from us to it over
+   * mutual edges (both entries list each other as neighbors); directly
+   * connected peers are always reachable. When a peer leaves, its neighbors
+   * drop it from their entries, so no mutual edge to it remains — but its own
+   * entry lingers because only the owner may update an entry. Entries that
+   * stay unreachable for UNREACHABLE_GRACE_MS are deleted.
+   */
+  #pruneTopology() {
+    // Directly connected peers are reachable by definition, even if their
+    // updated entry (listing us) hasn't arrived yet.
+    const reachable = new Set([this.#myId, ...this.#peers.keys()]);
+    const queue = [...reachable];
+    while (queue.length > 0) {
+      const id = /** @type {string} */ (queue.shift());
+      const entry = this.#topology.get(id);
+      if (!entry) continue;
+      for (const n of entry.neighbors) {
+        if (reachable.has(n)) continue;
+        const nEntry = this.#topology.get(n);
+        if (!nEntry || !nEntry.neighbors.includes(id)) continue; // require mutual edge
+        reachable.add(n);
+        queue.push(n);
+      }
+    }
+
+    const now = this.#clock.now();
+    for (const id of [...this.#topology.keys()]) {
+      if (id === this.#myId || reachable.has(id)) {
+        this.#unreachableSince.delete(id);
+        continue;
+      }
+      const since = this.#unreachableSince.get(id);
+      if (since === undefined) {
+        this.#unreachableSince.set(id, now);
+      } else if (now - since > this.#unreachableGraceMs) {
+        console.log(`[mesh] pruning departed peer ${id.slice(0, 8)} from topology`);
+        this.#topology.delete(id);
+        this.#unreachableSince.delete(id);
+        this.#relayAttempts.delete(id);
+      }
+    }
   }
 
   /**
@@ -348,6 +500,8 @@ export class PeerMesh {
       if (id === this.#myId) continue;
       if (this.#peers.has(id)) continue;
       if (this.#pendingOut.has(id)) continue;
+      if (this.#unreachableSince.has(id)) continue; // likely departed
+      if ((this.#relayAttempts.get(id) ?? 0) >= RELAY_MAX_ATTEMPTS) continue;
       if (this.#myId < id) {
         this.#initiateRelayConnection(id, entry.name)
           .catch(err => console.error('PeerMesh: relay connection failed', err));
@@ -373,31 +527,44 @@ export class PeerMesh {
   }
 
   /**
-   * Start a 30-second anti-entropy interval that re-gossips our own topology entry.
-   * This heals any divergence caused by dropped j messages.
+   * Start the anti-entropy interval: periodically sends a full TOPOLOGY
+   * snapshot to all neighbors (heals third-party divergence, not just our own
+   * entry — receivers merge and fan out anything they were missing), prunes
+   * departed peers, and retries missing connections.
    */
   #startAntiEntropy() {
     if (this.#antiEntropyInterval !== undefined) return;
-    this.#antiEntropyInterval = setInterval(() => {
-      const entry = this.#topology.get(this.#myId);
-      if (!entry || this.#peers.size === 0) return;
-      const str = JSON.stringify(/** @type {TopologyUpdateMessage} */({
-        type: 'TOPOLOGY_UPDATE',
-        entry,
+    this.#antiEntropyInterval = this.#clock.setInterval(() => {
+      this.#pruneTopology();
+      this.#checkForNewPeers();
+      if (this.#peers.size === 0) return;
+      const str = JSON.stringify(/** @type {TopologyMessage} */({
+        type: 'TOPOLOGY',
+        entries: [...this.#topology.values()],
       }));
       for (const p of this.#peers.values()) {
         p.connection.sendData(str);
       }
-    }, 30_000);
+    }, this.#antiEntropyMs);
   }
 
   /**
    * @param {string} id
    * @param {string} name
-   * @param {Connection} connection
+   * @param {MeshConnection} connection
+   * @param {PeerIdRef} peerIdRef
    */
-  #registerPeer(id, name, connection) {
-    if (this.#peers.has(id)) return; // already connected (shouldn't happen, but guard it)
+  #registerPeer(id, name, connection, peerIdRef) {
+    if (this.#peers.has(id)) {
+      // Already connected (e.g. simultaneous invite + relay). Discard the
+      // loser: mark its callbacks inert so closing it doesn't tear down the
+      // winning connection's peer entry.
+      console.log(`[mesh] duplicate connection to ${id.slice(0, 8)}, discarding`);
+      peerIdRef.discarded = true;
+      connection.close();
+      return;
+    }
+    peerIdRef.connection = connection;
 
     console.log(`[mesh] peer connected: ${id.slice(0, 8)} "${name}"`);
 
@@ -433,9 +600,11 @@ export class PeerMesh {
 
   /** @param {string} peerId */
   #handlePeerDisconnected(peerId) {
-    if (!this.#peers.has(peerId)) return;
+    const peer = this.#peers.get(peerId);
+    if (!peer) return;
     console.log(`[mesh] peer disconnected: ${peerId.slice(0, 8)}`);
     this.#peers.delete(peerId);
+    peer.connection.close(); // release the RTCPeerConnection (idempotent)
     this.#callbacks.onPeerDisconnected(peerId);
 
     // Update our own entry to remove the departed neighbor
@@ -447,6 +616,7 @@ export class PeerMesh {
     for (const p of this.#peers.values()) {
       p.connection.sendData(updateMsg);
     }
+    this.#pruneTopology();
     this.#logTopology();
   }
 
@@ -455,7 +625,18 @@ export class PeerMesh {
    * @param {string} rawData
    */
   #handleMessage(fromId, rawData) {
-    const message = /** @type {MeshMessage} */ (JSON.parse(rawData));
+    /** @type {MeshMessage} */
+    let message;
+    try {
+      const parsed = /** @type {unknown} */ (JSON.parse(rawData));
+      if (typeof parsed !== 'object' || parsed === null || typeof (/** @type {{type?: unknown}} */ (parsed).type) !== 'string') {
+        throw new Error('not a mesh message');
+      }
+      message = /** @type {MeshMessage} */ (parsed);
+    } catch {
+      console.warn(`[mesh] dropping malformed message from ${fromId.slice(0, 8)}`);
+      return;
+    }
 
     if (message.type === 'TOPOLOGY') {
       const updated = this.#mergeTopology(message.entries);
@@ -524,16 +705,32 @@ export class PeerMesh {
 
     console.log(`[mesh] initiating relay connection to ${targetId.slice(0, 8)} "${targetName}"`);
 
+    /** @type {PeerIdRef} */
     const peerIdRef = { peerId: targetId };
-    const { offerSdp, acceptAnswer } = await startOffer(
+    const { offerSdp, acceptAnswer, cancel } = await this.#transport.startOffer(
       this.#makeCallbacks(peerIdRef),
       undefined,
       this.#localTracks,
     );
-    this.#pendingOut.set(targetId, { name: targetName, acceptAnswer });
 
     const msgId = crypto.randomUUID();
     this.#markSeen(msgId); // Prevent re-processing if flooded back to us
+
+    // If no RELAY_ANSWER arrives (message lost, target gone), abandon the
+    // attempt so this pair isn't blocked forever, and retry up to the cap.
+    const timer = this.#clock.setTimeout(() => {
+      if (this.#pendingOut.get(targetId) !== pending) return;
+      this.#pendingOut.delete(targetId);
+      peerIdRef.discarded = true;
+      cancel();
+      const attempts = (this.#relayAttempts.get(targetId) ?? 0) + 1;
+      this.#relayAttempts.set(targetId, attempts);
+      console.warn(`[mesh] relay connection to ${targetId.slice(0, 8)} timed out (attempt ${attempts}/${RELAY_MAX_ATTEMPTS})`);
+      this.#checkForNewPeers();
+    }, this.#relayTimeoutMs);
+
+    const pending = { name: targetName, msgId, acceptAnswer, cancel, timer, peerIdRef };
+    this.#pendingOut.set(targetId, pending);
 
     const str = JSON.stringify(/** @type {RelayOfferMessage} */({
       type: 'RELAY_OFFER',
@@ -555,8 +752,9 @@ export class PeerMesh {
       return; // already connected
     }
 
+    /** @type {PeerIdRef} */
     const peerIdRef = { peerId: message.from };
-    const { answerSdp, waitForConnect } = await answerOffer(
+    const { answerSdp, waitForConnect } = await this.#transport.answerOffer(
       message.sdp,
       this.#makeCallbacks(peerIdRef),
       undefined,
@@ -565,7 +763,7 @@ export class PeerMesh {
 
     // Connection completes asynchronously when the data channel opens
     waitForConnect().then(connection => {
-      this.#registerPeer(message.from, message.name, connection);
+      this.#registerPeer(message.from, message.name, connection, peerIdRef);
     }).catch(err => console.error('PeerMesh: relay connection failed', err));
 
     const msgId = crypto.randomUUID();
@@ -574,6 +772,7 @@ export class PeerMesh {
     const str = JSON.stringify(/** @type {RelayAnswerMessage} */({
       type: 'RELAY_ANSWER',
       msgId,
+      replyTo: message.msgId,
       from: this.#myId,
       to: message.from,
       sdp: answerSdp,
@@ -590,9 +789,25 @@ export class PeerMesh {
       console.warn(`[mesh] RELAY_ANSWER from ${message.from.slice(0, 8)}: no pending connection, ignoring`);
       return;
     }
+    if (message.replyTo !== pending.msgId) {
+      // Answer to an earlier, already-abandoned offer (e.g. it arrived after
+      // our timeout retried). The current attempt is still waiting for its
+      // own answer — keep it.
+      console.warn(`[mesh] RELAY_ANSWER from ${message.from.slice(0, 8)}: stale (for an abandoned offer), ignoring`);
+      return;
+    }
     this.#pendingOut.delete(message.from);
+    this.#clock.clearTimeout(pending.timer);
 
-    const connection = await pending.acceptAnswer(message.sdp);
-    this.#registerPeer(message.from, pending.name, connection);
+    try {
+      const connection = await pending.acceptAnswer(message.sdp);
+      this.#registerPeer(message.from, pending.name, connection, pending.peerIdRef);
+    } catch (err) {
+      pending.peerIdRef.discarded = true;
+      pending.cancel();
+      const attempts = (this.#relayAttempts.get(message.from) ?? 0) + 1;
+      this.#relayAttempts.set(message.from, attempts);
+      console.error(`[mesh] relay handshake with ${message.from.slice(0, 8)} failed (attempt ${attempts}/${RELAY_MAX_ATTEMPTS})`, err);
+    }
   }
 }

@@ -137,7 +137,7 @@ async function startScreenShare() {
 
     const videoTrack = screenStream.getVideoTracks()[0];
     if (videoTrack) {
-      await mesh.replaceVideoTrack(videoTrack);
+      await mesh.replaceTrack('video', videoTrack);
       mesh.broadcast({ type: 'SCREEN_SHARE', active: true });
       videoTrack.addEventListener('ended', () => {
         stopScreenShare().catch(err => console.error('Failed to stop screen share:', err));
@@ -158,62 +158,50 @@ async function stopScreenShare() {
   dispatch('setScreenShare', null);
 
   const cameraTrack = select(s => s.localStream)?.getVideoTracks()[0] ?? null;
-  await mesh.replaceVideoTrack(cameraTrack);
+  await mesh.replaceTrack('video', cameraTrack);
   mesh.broadcast({ type: 'SCREEN_SHARE', active: false });
+}
+
+/**
+ * @param {'audio' | 'video'} kind
+ * @param {string} deviceId
+ */
+async function switchDevice(kind, deviceId) {
+  const localStream = select(s => s.localStream);
+  if (!localStream) return;
+  try {
+    const constraint = { deviceId: { exact: deviceId } };
+    const stream = await navigator.mediaDevices.getUserMedia(
+      kind === 'audio' ? { audio: constraint } : { video: constraint },
+    );
+    const newTrack = (kind === 'audio' ? stream.getAudioTracks() : stream.getVideoTracks())[0];
+    if (!newTrack) return;
+
+    newTrack.enabled = select(s => kind === 'audio' ? s.audioEnabled : s.videoEnabled);
+
+    const oldTrack = (kind === 'audio' ? localStream.getAudioTracks() : localStream.getVideoTracks())[0];
+    if (oldTrack) {
+      oldTrack.stop();
+      localStream.removeTrack(oldTrack);
+    }
+    localStream.addTrack(newTrack);
+    await mesh.replaceTrack(kind, newTrack);
+
+    dispatch(kind === 'audio' ? 'setSelectedAudioDevice' : 'setSelectedVideoDevice', deviceId);
+  } catch (err) {
+    console.error(`Failed to switch ${kind} device:`, err);
+  }
 }
 
 /** @param {string} deviceId */
 export async function switchAudioDevice(deviceId) {
-  const localStream = select(s => s.localStream);
-  if (!localStream) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: { exact: deviceId } },
-    });
-    const newTrack = stream.getAudioTracks()[0];
-    if (!newTrack) return;
-
-    newTrack.enabled = select(s => s.audioEnabled);
-
-    const oldTrack = localStream.getAudioTracks()[0];
-    if (oldTrack) {
-      oldTrack.stop();
-      localStream.removeTrack(oldTrack);
-    }
-    localStream.addTrack(newTrack);
-    await mesh.replaceAudioTrack(newTrack);
-
-    dispatch('setSelectedAudioDevice', deviceId);
-  } catch (err) {
-    console.error('Failed to switch audio device:', err);
-  }
+  await switchDevice('audio', deviceId);
 }
 
 /** @param {string} deviceId */
 export async function switchVideoDevice(deviceId) {
-  const localStream = select(s => s.localStream);
-  if (!localStream || select(s => s.screenShareActive)) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: deviceId } },
-    });
-    const newTrack = stream.getVideoTracks()[0];
-    if (!newTrack) return;
-
-    newTrack.enabled = select(s => s.videoEnabled);
-
-    const oldTrack = localStream.getVideoTracks()[0];
-    if (oldTrack) {
-      oldTrack.stop();
-      localStream.removeTrack(oldTrack);
-    }
-    localStream.addTrack(newTrack);
-    await mesh.replaceVideoTrack(newTrack);
-
-    dispatch('setSelectedVideoDevice', deviceId);
-  } catch (err) {
-    console.error('Failed to switch video device:', err);
-  }
+  if (select(s => s.screenShareActive)) return;
+  await switchDevice('video', deviceId);
 }
 
 // --- Settings ---

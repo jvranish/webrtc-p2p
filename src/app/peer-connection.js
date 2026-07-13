@@ -17,32 +17,52 @@ const defaultRtcConfig = /** @type {RTCConfiguration} */ ({ iceServers: defaultI
 
 /**
  * Wait for ICE gathering to reach the 'complete' state.
+ * Falls back after 10s with whatever candidates have been gathered so far,
+ * so a misbehaving STUN server can't hang token creation forever.
  * @param {RTCPeerConnection} connection
  * @returns {Promise<void>}
  */
 function waitIceComplete(connection) {
   if (connection.iceGatheringState === 'complete') return Promise.resolve();
   return new Promise((resolve) => {
-    const handler = () => {
-      if (connection.iceGatheringState === 'complete') {
-        connection.removeEventListener('icegatheringstatechange', handler);
-        resolve();
-      }
+    const done = () => {
+      clearTimeout(timer);
+      connection.removeEventListener('icegatheringstatechange', handler);
+      resolve();
     };
+    const handler = () => {
+      if (connection.iceGatheringState === 'complete') done();
+    };
+    const timer = setTimeout(() => {
+      console.warn('ICE gathering timed out; proceeding with partial candidates');
+      done();
+    }, 10_000);
     connection.addEventListener('icegatheringstatechange', handler);
   });
 }
 
 /**
  * Wait for a data channel to reach the 'open' state.
+ * Rejects if the underlying connection fails or is closed, so callers
+ * (e.g. the invite modal) can surface the error instead of hanging.
+ * No fixed timeout: the wait legitimately spans human copy/paste time.
  * @param {RTCDataChannel} channel
+ * @param {RTCPeerConnection} pc
  * @returns {Promise<void>}
  */
-function waitForChannelOpen(channel) {
+function waitForChannelOpen(channel, pc) {
   if (channel.readyState === 'open') return Promise.resolve();
   return new Promise((resolve, reject) => {
-    channel.addEventListener('open', () => resolve(), { once: true });
-    channel.addEventListener('error', (e) => reject(e), { once: true });
+    const cleanup = () => pc.removeEventListener('connectionstatechange', onState);
+    const onState = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        cleanup();
+        reject(new Error(`Connection ${pc.connectionState} before data channel opened`));
+      }
+    };
+    pc.addEventListener('connectionstatechange', onState);
+    channel.addEventListener('open', () => { cleanup(); resolve(); }, { once: true });
+    channel.addEventListener('error', () => { cleanup(); reject(new Error('Data channel error')); }, { once: true });
   });
 }
 
@@ -96,7 +116,10 @@ function addTracks(pc, tracks) {
  * @param {ConnectionCallbacks} [callbacks]
  * @param {RTCConfiguration} [rtcConfig]
  * @param {MediaStreamTrack[]} [tracks]
- * @returns {Promise<{offerSdp: string, acceptAnswer: (answerSdp: string) => Promise<Connection>}>}
+ * Also returns a cancel function that aborts the attempt and releases the
+ * RTCPeerConnection (used when a relay handshake times out).
+ *
+ * @returns {Promise<{offerSdp: string, acceptAnswer: (answerSdp: string) => Promise<Connection>, cancel: () => void}>}
  */
 export async function startOffer(callbacks = {}, rtcConfig = defaultRtcConfig, tracks = []) {
   const pc = new RTCPeerConnection(rtcConfig);
@@ -118,11 +141,16 @@ export async function startOffer(callbacks = {}, rtcConfig = defaultRtcConfig, t
 
   const acceptAnswer = async (/** @type {string} */ answerSdp) => {
     await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    await waitForChannelOpen(channel);
+    await waitForChannelOpen(channel, pc);
     return new Connection(pc, channel, callbacks, false, [...tracks], remoteStreams);
   };
 
-  return { offerSdp: desc.sdp ?? '', acceptAnswer };
+  const cancel = () => {
+    channel.close();
+    pc.close();
+  };
+
+  return { offerSdp: desc.sdp ?? '', acceptAnswer, cancel };
 }
 
 /**
@@ -154,6 +182,18 @@ export async function answerOffer(offerSdp, callbacks = {}, rtcConfig = defaultR
     }, { once: true });
   });
 
+  // Rejects if the connection fails before the data channel ever arrives,
+  // so waitForConnect doesn't hang forever on a dead handshake.
+  /** @type {Promise<never>} */
+  const connectionFailed = new Promise((_, reject) => {
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        reject(new Error(`Connection ${pc.connectionState} before data channel opened`));
+      }
+    });
+  });
+  connectionFailed.catch(() => {}); // prevent unhandled rejection if never awaited
+
   await pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
 
   const answerInit = await pc.createAnswer();
@@ -164,8 +204,8 @@ export async function answerOffer(offerSdp, callbacks = {}, rtcConfig = defaultR
   if (!desc) throw new Error('Failed to create local description');
 
   const waitForConnect = async () => {
-    const channel = await channelPromise;
-    await waitForChannelOpen(channel);
+    const channel = await Promise.race([channelPromise, connectionFailed]);
+    await waitForChannelOpen(channel, pc);
     return new Connection(pc, channel, callbacks, true, [...tracks], remoteStreams);
   };
 
@@ -217,12 +257,20 @@ export class Connection {
     // Handle data channel messages (intercept renegotiation, forward the rest)
     dataChannel.addEventListener('message', (e) => {
       if (typeof e.data === 'string') {
-        const message = JSON.parse(e.data);
+        /** @type {{type?: unknown, sdp?: unknown}} */
+        let message;
+        try {
+          message = JSON.parse(e.data);
+        } catch {
+          console.warn('Connection: dropping malformed message');
+          return;
+        }
+        const sdp = typeof message.sdp === 'string' ? message.sdp : '';
         if (message.type === 'RENEGOTIATE_OFFER') {
-          this.#handleRenegotiateOffer(message.sdp).catch(err =>
+          this.#handleRenegotiateOffer(sdp).catch(err =>
             console.error('Connection: handleRenegotiateOffer failed', err));
         } else if (message.type === 'RENEGOTIATE_ANSWER') {
-          this.#handleRenegotiateAnswer(message.sdp).catch(err =>
+          this.#handleRenegotiateAnswer(sdp).catch(err =>
             console.error('Connection: handleRenegotiateAnswer failed', err));
         } else {
           this.#callbacks.onMessage?.(e.data);
@@ -309,13 +357,28 @@ export class Connection {
   }
 
   /**
+   * Find the sender we use for a given kind. Looks up by transceiver kind and
+   * sending direction rather than sender.track — after removeTrack() the
+   * sender's track is null, and matching on track.kind would miss it (causing
+   * a duplicate transceiver to be added on every remove/replace cycle).
+   * @param {'video' | 'audio'} kind
+   * @returns {RTCRtpSender | null}
+   */
+  #findSender(kind) {
+    const transceiver = this.#pc.getTransceivers().find(t =>
+      (t.direction === 'sendrecv' || t.direction === 'sendonly') &&
+      t.receiver.track.kind === kind);
+    return transceiver?.sender ?? null;
+  }
+
+  /**
    * Replace a track of a specific kind (video or audio).
    * @param {MediaStreamTrack} newTrack
    * @returns {Promise<void>}
    */
   async replaceTrack(newTrack) {
-    const senders = this.#pc.getSenders();
-    const sender = senders.find(s => s.track?.kind === newTrack.kind);
+    const kind = /** @type {'video' | 'audio'} */ (newTrack.kind);
+    const sender = this.#findSender(kind);
 
     if (sender) {
       await sender.replaceTrack(newTrack);
@@ -330,12 +393,12 @@ export class Connection {
 
   /**
    * Remove a track of a specific kind (video or audio).
+   * The sender is kept (with a null track) so a later replaceTrack reuses it.
    * @param {'video' | 'audio'} kind
    * @returns {Promise<void>}
    */
   async removeTrack(kind) {
-    const senders = this.#pc.getSenders();
-    const sender = senders.find(s => s.track?.kind === kind);
+    const sender = this.#findSender(kind);
 
     if (sender) {
       await sender.replaceTrack(null);

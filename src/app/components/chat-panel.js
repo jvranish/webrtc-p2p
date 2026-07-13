@@ -13,8 +13,10 @@ const ChatPanel = asComponent({
   },
   /** @param {AppState} props */
   render(props) {
-    const messages = props.messages.map(msg => ({
-      key: msg.timestamp + msg.fromId,
+    // messages is append-only, so the index is a stable key (timestamp+fromId
+    // can collide for two same-millisecond messages from one peer)
+    const messages = props.messages.map((msg, i) => ({
+      key: String(i),
       value: html`
         <div class="chat-message">
           <div class="chat-from">${msg.fromId === props.myId ? 'You' : msg.fromName}</div>
