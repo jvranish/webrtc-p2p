@@ -3,6 +3,7 @@
 import { html, asComponent } from 'scaffold-html';
 import { submitAnswer, cancelInvite } from '../actions.js';
 import { cast } from '../utils.js';
+import { icon } from '../icons.js';
 
 /** @import {AppState} from '../state.js' */
 
@@ -48,7 +49,7 @@ const InviteModal = asComponent({
                 <input type="text" readonly value=${props.offerLink ?? ''} onclick=${(/** @type {Event} */ e) => {
                   cast(HTMLInputElement, e.target).select();
                 }}>
-                <button onclick=${copyLink}>Copy</button>
+                <button onclick=${copyLink}>${icon.copy()} Copy</button>
               </div>
             </label>
             <label>
@@ -67,6 +68,7 @@ const InviteModal = asComponent({
           <footer>
             <button onclick=${() => cancelInvite()}>Cancel</button>
             <button
+              class="primary"
               onclick=${() => submitAnswer(this.state.answerDraft)}
               disabled=${!this.state.answerDraft.trim()}
             >Connect</button>

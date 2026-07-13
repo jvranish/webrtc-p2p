@@ -3,6 +3,7 @@
 import { html } from 'scaffold-html';
 import { toggleSettings, switchAudioDevice, switchVideoDevice } from '../actions.js';
 import { cast } from '../utils.js';
+import { icon } from '../icons.js';
 
 /** @import {AppState} from '../state.js' */
 
@@ -18,7 +19,7 @@ export const SettingsPanel = (state) => {
       <div class="modal" onclick=${(/** @type {Event} */ e) => e.stopPropagation()}>
         <div class="modal-header">
           <h2>Settings</h2>
-          <button class="close-btn" onclick=${() => toggleSettings()}>×</button>
+          <button class="close-btn" onclick=${() => toggleSettings()} aria-label="Close settings">${icon.close()}</button>
         </div>
         <div class="modal-body settings-body">
           <div class="settings-section">

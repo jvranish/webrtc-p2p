@@ -4,6 +4,7 @@ import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
 import { sendChat } from '../actions.js';
 import { cast } from '../utils.js';
+import { icon } from '../icons.js';
 
 /** @import {AppState} from '../state.js' */
 
@@ -35,7 +36,7 @@ const ChatPanel = asComponent({
       <aside class="chat-panel">
         <header class="chat-header">
           <span>Chat</span>
-          <button class="icon-btn" onclick=${() => dispatch('toggleChat')} aria-label="Close chat">✕</button>
+          <button class="icon-btn" onclick=${() => dispatch('toggleChat')} aria-label="Close chat">${icon.close()}</button>
         </header>
         <div class="chat-messages">
           ${messages.length > 0 ? messages : html`<p class="chat-empty">No messages yet.</p>`}
@@ -53,7 +54,7 @@ const ChatPanel = asComponent({
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
             }}
           >
-          <button onclick=${submit} disabled=${!this.state.draft.trim()}>Send</button>
+          <button class="primary" onclick=${submit} disabled=${!this.state.draft.trim()} aria-label="Send">${icon.send()}</button>
         </div>
       </aside>
     `;

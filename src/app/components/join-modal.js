@@ -4,6 +4,7 @@ import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
 import { handleOffer } from '../actions.js';
 import { cast } from '../utils.js';
+import { icon } from '../icons.js';
 
 /** @import {AppState} from '../state.js' */
 
@@ -49,13 +50,13 @@ const JoinModal = asComponent({
                 <input type="text" readonly value=${props.answerToken ?? ''} onclick=${(/** @type {Event} */ e) => {
                   cast(HTMLInputElement, e.target).select();
                 }}>
-                <button onclick=${copyAnswer}>Copy</button>
+                <button onclick=${copyAnswer}>${icon.copy()} Copy</button>
               </div>
             </label>
             <p class="hint">Once they paste your token, you'll be connected automatically.</p>
           </div>
           <footer>
-            <button onclick=${() => dispatch('closeJoinModal')}>Done</button>
+            <button class="primary" onclick=${() => dispatch('closeJoinModal')}>Done</button>
           </footer>
         </div>
       </div>
@@ -91,6 +92,7 @@ const JoinButton = asComponent({
           }}
         >
         <button
+          class="primary"
           onclick=${open}
           disabled=${!this.state.offerDraft.trim() || props.joinPhase !== 'idle'}
         >Join</button>

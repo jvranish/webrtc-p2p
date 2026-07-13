@@ -4,6 +4,7 @@ import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
 import { setName, startMedia, toggleScreenShare, startInvite, toggleSettings } from '../actions.js';
 import { cast } from '../utils.js';
+import { icon } from '../icons.js';
 import { ChatPanel } from './chat-panel.js';
 import { InviteModal } from './invite-modal.js';
 import { JoinModal, JoinButton } from './join-modal.js';
@@ -37,7 +38,7 @@ const PeerTile = asComponent({
           : html`<div class="peer-avatar">${peer.name.charAt(0).toUpperCase()}</div>`
         }
         <div class="peer-name">${peer.name}</div>
-        ${pinned ? html`<div class="pin-badge">📌</div>` : ''}
+        ${pinned ? html`<div class="pin-badge">${icon.pin()}</div>` : ''}
       </div>
     `;
   },
@@ -80,7 +81,7 @@ const SelfTile = asComponent({
             }}
           >
         </div>
-        <div class="self-label">You${state.screenShareActive ? ' (Screen)' : ''}</div>
+        <div class="self-label">You${state.screenShareActive ? ' · Screen' : ''}</div>
       </div>
     `;
   },
@@ -129,56 +130,73 @@ const EmptyState = (state) => html`
 `;
 
 /** @param {AppState} state */
-const Toolbar = (state) => html`
-  <div class="toolbar">
-    ${!state.localStream
-      ? html`<button onclick=${() => startMedia()}>Start Camera</button>`
-      : html`
+const TopNav = (state) => {
+  const connected = state.peers.size + 1;
+  return html`
+    <nav class="top-nav">
+      <span class="nav-brand">Session</span>
+      <span class="nav-meta">${connected} connected · peer-to-peer</span>
+      <div class="nav-spacer"></div>
+      <div class="nav-group">
+        ${!state.localStream
+          ? html`<button class="primary" onclick=${() => startMedia()}>${icon.camera()} Start Camera</button>`
+          : html`
+            <button
+              class=${['ctrl', state.audioEnabled ? 'active' : 'danger active']}
+              onclick=${() => dispatch('toggleAudio')}
+              title=${state.audioEnabled ? 'Mute' : 'Unmute'}
+              aria-label=${state.audioEnabled ? 'Mute' : 'Unmute'}
+            >${state.audioEnabled ? icon.mic() : icon.micOff()}</button>
+            <button
+              class=${['ctrl', state.videoEnabled ? 'active' : 'danger active']}
+              onclick=${() => dispatch('toggleVideo')}
+              title=${state.videoEnabled ? 'Stop video' : 'Start video'}
+              aria-label=${state.videoEnabled ? 'Stop video' : 'Start video'}
+            >${state.videoEnabled ? icon.cam() : icon.camOff()}</button>
+          `
+        }
         <button
-          class=${state.audioEnabled ? 'active' : ''}
-          onclick=${() => dispatch('toggleAudio')}
-          title=${state.audioEnabled ? 'Mute' : 'Unmute'}
-        >${state.audioEnabled ? '🎤' : '🎤🚫'}</button>
+          class=${['ctrl', state.screenShareActive ? 'active' : '']}
+          onclick=${() => toggleScreenShare()}
+          title=${state.screenShareActive ? 'Stop sharing' : 'Share screen'}
+          aria-label=${state.screenShareActive ? 'Stop sharing' : 'Share screen'}
+        >${icon.share()}</button>
+      </div>
+
+      <div class="nav-divider"></div>
+
+      <div class="nav-group">
         <button
-          class=${state.videoEnabled ? 'active' : ''}
-          onclick=${() => dispatch('toggleVideo')}
-          title=${state.videoEnabled ? 'Stop Video' : 'Start Video'}
-        >${state.videoEnabled ? '📹' : '📹🚫'}</button>
-      `
-    }
-    <button
-      class=${state.screenShareActive ? 'active' : ''}
-      onclick=${() => toggleScreenShare()}
-      title=${state.screenShareActive ? 'Stop Sharing' : 'Share Screen'}
-    >${state.screenShareActive ? '🖥️✓' : '🖥️'}</button>
-    <button
-      onclick=${() => startInvite()}
-      disabled=${state.invitePhase !== 'idle'}
-    >Invite</button>
-    <button
-      class=${state.chatOpen ? 'active' : ''}
-      onclick=${() => dispatch('toggleChat')}
-    >Chat ${state.messages.length > 0 ? html`<span class="badge">${state.messages.length}</span>` : ''}</button>
-    <button
-      class=${state.settingsOpen ? 'active' : ''}
-      onclick=${() => toggleSettings()}
-      title="Settings"
-    >⚙️</button>
-  </div>
-`;
+          onclick=${() => startInvite()}
+          disabled=${state.invitePhase !== 'idle'}
+        >${icon.invite()} Invite</button>
+        <button
+          class=${state.chatOpen ? 'active' : ''}
+          onclick=${() => dispatch('toggleChat')}
+        >${icon.chat(17)} Chat${state.messages.length > 0 ? html` <span class="badge">${state.messages.length}</span>` : ''}</button>
+        <button
+          class=${['ctrl', state.settingsOpen ? 'active' : '']}
+          onclick=${() => toggleSettings()}
+          title="Settings"
+          aria-label="Settings"
+        >${icon.settings()}</button>
+      </div>
+    </nav>
+  `;
+};
 
 /** @param {AppState} state */
 export const App = (state) => {
   const hasPeers = state.peers.size > 0;
   return html`
     <div class="app">
+      ${TopNav(state)}
       <div class="tiles-area">
         ${hasPeers
           ? (state.pinnedPeerId ? PinnedLayout(state) : GridLayout(state))
           : EmptyState(state)
         }
       </div>
-      ${Toolbar(state)}
       ${state.chatOpen ? ChatPanel(state) : ''}
       ${InviteModal(state)}
       ${JoinModal(state)}

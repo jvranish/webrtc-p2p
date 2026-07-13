@@ -1,92 +1,279 @@
-/* ── Layout ────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════
+   P2P Video Chat — self-contained stylesheet (no framework).
+   Warm-neutral palette, 12px radii, Archivo type. Replaces oat + the old
+   bespoke app.css. Everything the app needs lives here.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* surfaces & ink */
+  --bg: #f8f2ea;
+  --surface: #efe6d9;
+  --surface-2: #f3ece1;
+  --text: #2c2318;
+  --muted: #6d604f;
+  --border: color-mix(in srgb, #2c2318 16%, transparent);
+  --border-strong: color-mix(in srgb, #2c2318 32%, transparent);
+
+  /* accent (terracotta) */
+  --accent: #c8632f;
+  --accent-hover: #a8531f;
+  --accent-active: #833f18;
+  --accent-fg: #ffffff;
+  --accent-soft: #fbe9de;
+  --accent-soft-fg: #833f18;
+
+  --danger: #b3341c;
+
+  /* type */
+  --font: "Archivo", system-ui, -apple-system, sans-serif;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 800;
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* radii */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  /* elevation */
+  --shadow: 0 3px 10px color-mix(in srgb, #332c24 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #332c24 22%, transparent);
+
+  --z-modal: 100;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #211a12;
+    --surface: #2b2217;
+    --surface-2: #342a1d;
+    --text: #f3ece1;
+    --muted: #b7a891;
+    --border: color-mix(in srgb, #f3ece1 18%, transparent);
+    --border-strong: color-mix(in srgb, #f3ece1 34%, transparent);
+    --accent-soft: color-mix(in srgb, #c8632f 26%, transparent);
+    --accent-soft-fg: #f5cdb2;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { font-weight: var(--fw-bold); line-height: 1.15; letter-spacing: -0.01em; margin: 0; }
+
+a { color: var(--accent); }
+a:hover { color: var(--accent-hover); }
+
+/* ── Form controls ─────────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  font-weight: var(--fw-bold);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+button:active { background: color-mix(in srgb, var(--text) 13%, transparent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button svg { display: block; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.primary:active { background: var(--accent-active); border-color: var(--accent-active); }
+
+input, textarea, select {
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  padding: 8px 11px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  caret-color: var(--accent);
+}
+input:hover, textarea:hover, select:hover { border-color: var(--border-strong); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+textarea { min-height: 92px; resize: vertical; }
+select:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── App shell ─────────────────────────────────────────────────────────── */
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100dvh;
   overflow: hidden;
-  background: var(--background);
+  background: var(--bg);
+  position: relative;
 }
+
+/* ── Top nav (controls live here) ──────────────────────────────────────── */
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 2px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.nav-brand {
+  font-weight: var(--fw-bold);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-right: var(--space-3);
+}
+
+.nav-meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin-right: auto;
+}
+
+.nav-spacer { flex: 1; }
+
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.nav-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px var(--space-1);
+  background: var(--border);
+}
+
+/* icon control button */
+.ctrl {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.ctrl.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-soft-fg);
+}
+.ctrl.danger.active {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 5px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+}
+
+/* ── Stage ─────────────────────────────────────────────────────────────── */
 
 .tiles-area {
   flex: 1;
   min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  padding: var(--space-6);
 }
 
-/* ── Grid layout ───────────────────────────────────────────────────────── */
-
+/* Grid: fills the stage — equal cells that stretch to use all the space */
 .tiles-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-  gap: var(--space-2);
-  padding: var(--space-2);
   height: 100%;
-  overflow-y: auto;
-  align-content: start;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: var(--space-3);
 }
 
-/* ── Pinned layout ─────────────────────────────────────────────────────── */
-
+/* Pinned: one large speaker + a strip of the rest */
 .tiles-pinned {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-4);
   height: 100%;
 }
-
 .tile-main {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
 
-  & .peer-tile {
-    height: 100%;
-    aspect-ratio: unset;
-  }
+  & .peer-tile { height: 100%; }
 }
-
 .tile-strip {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  width: 180px;
-  overflow-y: auto;
+  gap: var(--space-3);
+  height: 150px;
   flex-shrink: 0;
+  overflow-x: auto;
+
+  & .peer-tile { width: 220px; height: 100%; flex-shrink: 0; }
 }
 
 /* ── Peer tile ─────────────────────────────────────────────────────────── */
 
 .peer-tile {
-  background: var(--card);
-  border: 2px solid var(--border);
-  border-radius: var(--radius-medium);
-  aspect-ratio: 16 / 9;
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  cursor: pointer;
-  position: relative;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  transition: border-color var(--transition-fast);
+  cursor: pointer;
+  transition: border-color 120ms ease;
 
-  &:hover {
-    border-color: var(--primary);
-  }
-
-  &.peer-tile--pinned {
-    border-color: var(--primary);
-  }
-
-  &.peer-tile--self {
-    cursor: default;
-
-    &:hover {
-      border-color: var(--border);
-    }
-  }
+  &:hover { border-color: var(--accent); }
+  &.peer-tile--pinned { border-color: var(--accent); }
+  &.peer-tile--self { cursor: default; }
+  &.peer-tile--self:hover { border-color: var(--accent); }
 
   & video {
     position: absolute;
@@ -94,92 +281,76 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    background: var(--card);
+    background: var(--surface);
   }
 }
 
 .peer-avatar {
-  width: 52px;
-  height: 52px;
+  width: 60px;
+  height: 60px;
   border-radius: var(--radius-full);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
+  background: var(--surface-2);
+  color: var(--muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-3);
-  font-weight: var(--font-semibold);
+  font-size: 22px;
+  font-weight: var(--fw-bold);
   flex-shrink: 0;
 
-  &.peer-avatar--self {
-    background: var(--primary);
-    color: var(--primary-foreground);
-  }
+  &.peer-avatar--self { background: var(--accent); color: var(--accent-fg); }
 }
 
 .peer-name {
-  font-size: var(--text-7);
-  color: var(--muted-foreground);
-  max-width: 100%;
-  padding-inline: var(--space-2);
-  position: relative;
-  z-index: 1;
-  background: var(--card);
-  border-radius: var(--radius-small);
-  padding: var(--space-1) var(--space-2);
-}
-
-.peer-tile:has(video) .peer-name {
   position: absolute;
-  bottom: var(--space-2);
-  left: var(--space-2);
-  color: white;
-  background: rgb(0 0 0 / 0.6);
+  bottom: var(--space-3);
+  left: var(--space-3);
+  z-index: 1;
+  max-width: calc(100% - var(--space-6));
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(4px);
 }
+.peer-tile:has(video) .peer-name { color: #fff; background: rgb(0 0 0 / 0.55); }
 
 .name-input {
+  width: 130px;
+  padding: 2px var(--space-2);
   background: transparent;
   border: none;
-  border-bottom: 1px dashed var(--border);
-  text-align: center;
-  font-size: var(--text-7);
-  color: var(--muted-foreground);
-  width: 120px;
-  padding: var(--space-1);
-
-  &:focus {
-    outline: none;
-    border-bottom-color: var(--primary);
-    color: var(--foreground);
-  }
+  border-bottom: 1px dashed var(--border-strong);
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  color: inherit;
 }
-
-.peer-tile:has(video) .name-input {
-  color: white;
-  border-bottom-color: rgba(255, 255, 255, 0.4);
-
-  &:focus {
-    border-bottom-color: var(--primary);
-  }
-}
+.name-input:focus { outline: none; border-bottom-color: var(--accent); }
+.peer-tile:has(video) .name-input { color: #fff; border-bottom-color: rgb(255 255 255 / 0.5); }
 
 .self-label {
   position: absolute;
-  top: var(--space-2);
-  left: var(--space-2);
-  font-size: var(--text-8);
-  color: var(--muted-foreground);
-  background: var(--card);
-  border-radius: var(--radius-small);
-  padding: 1px var(--space-1);
+  top: var(--space-3);
+  left: var(--space-3);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
 }
+.peer-tile:has(video) .self-label { color: #fff; background: rgb(0 0 0 / 0.55); }
 
 .pin-badge {
   position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  font-size: var(--text-7);
+  top: var(--space-3);
+  right: var(--space-3);
+  color: var(--accent);
 }
 
 /* ── Empty / solo state ────────────────────────────────────────────────── */
@@ -189,111 +360,67 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  padding: var(--space-4);
 }
-
 .empty-state-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-5);
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
 
   & .peer-tile {
     width: 100%;
-    max-width: 280px;
+    aspect-ratio: 16 / 9;
     cursor: default;
   }
 }
-
-.empty-hint {
-  color: var(--muted-foreground);
-  text-align: center;
-  margin: 0;
-}
+.empty-hint { color: var(--muted); text-align: center; margin: 0; }
 
 .join-input-row {
   display: flex;
   gap: var(--space-2);
   width: 100%;
 
-  & input {
-    flex: 1;
-    min-width: 0;
-  }
+  & input { flex: 1; min-width: 0; }
 }
 
-/* ── Toolbar ───────────────────────────────────────────────────────────── */
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
-  background: var(--card);
-  flex-shrink: 0;
-
-  & button.active {
-    background: var(--secondary);
-  }
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: var(--text-8);
-  font-weight: var(--font-semibold);
-  border-radius: var(--radius-full);
-  min-width: 1.2em;
-  height: 1.2em;
-  padding-inline: 0.3em;
-  margin-left: var(--space-1);
-  vertical-align: middle;
-}
-
-/* ── Chat panel ────────────────────────────────────────────────────────── */
+/* ── Chat panel (floating overlay) ─────────────────────────────────────── */
 
 .chat-panel {
-  position: fixed;
-  inset-block: 0;
-  right: 0;
-  width: 300px;
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  bottom: var(--space-4);
+  width: 320px;
   display: flex;
   flex-direction: column;
-  background: var(--card);
-  border-left: 1px solid var(--border);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
   z-index: 10;
-  box-shadow: var(--shadow-large);
 }
-
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
-  font-weight: var(--font-semibold);
+  font-weight: var(--fw-bold);
+  font-size: 16px;
 }
-
 .icon-btn {
-  background: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: none;
-  padding: var(--space-1);
-  cursor: pointer;
-  color: var(--muted-foreground);
-  line-height: 1;
-
-  &:hover {
-    color: var(--foreground);
-  }
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
 }
-
+.icon-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .chat-messages {
   flex: 1;
   min-height: 0;
@@ -303,37 +430,23 @@
   flex-direction: column;
   gap: var(--space-3);
 }
-
-.chat-empty {
-  color: var(--muted-foreground);
-  text-align: center;
-  font-size: var(--text-7);
-}
-
+.chat-empty { color: var(--muted); text-align: center; font-size: 13px; }
 .chat-message {
   & .chat-from {
-    font-size: var(--text-8);
-    font-weight: var(--font-semibold);
-    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: var(--fw-semibold);
+    color: var(--muted);
     margin-bottom: 2px;
   }
-
-  & .chat-text {
-    word-break: break-word;
-    font-size: var(--text-7);
-  }
+  & .chat-text { font-size: 14px; word-break: break-word; }
 }
-
 .chat-input-row {
   display: flex;
   gap: var(--space-2);
   padding: var(--space-3);
   border-top: 1px solid var(--border);
 
-  & input {
-    flex: 1;
-    min-width: 0;
-  }
+  & input { flex: 1; min-width: 0; }
 }
 
 /* ── Modals ────────────────────────────────────────────────────────────── */
@@ -341,141 +454,78 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.5);
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: var(--z-modal);
+  padding: var(--space-4);
+  background: color-mix(in srgb, #201a12 55%, transparent);
 }
-
 .modal {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-large);
-  box-shadow: var(--shadow-large);
-  width: min(100% - 2rem, 32rem);
+  width: min(100%, 440px);
   max-height: 85dvh;
   overflow: auto;
   display: flex;
   flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 
   & > header {
-    padding: var(--space-6);
-    padding-block-end: 0;
+    padding: var(--space-6) var(--space-6) 0;
 
-    & h2 {
-      margin-block-start: 0;
-      margin-block-end: var(--space-1);
-    }
-
-    & p {
-      color: var(--muted-foreground);
-      font-size: var(--text-7);
-      margin: 0;
-    }
+    & h2 { font-size: 22px; margin-bottom: var(--space-1); }
+    & p { color: var(--muted); font-size: 14px; margin: 0; }
   }
-
   & > div:not(.modal-header) {
     padding: var(--space-6);
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
   }
-
   & > footer {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
-    padding: var(--space-6);
-    padding-block-start: 0;
+    padding: 0 var(--space-6) var(--space-6);
   }
 }
-
 .modal-header {
   display: flex;
-  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4);
+  padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);
 
-  & h2 {
-    margin: 0;
-    font-size: var(--text-3);
-  }
-
-  & .close-btn {
-    margin-left: var(--space-2);
-  }
+  & h2 { font-size: 20px; }
 }
-
 .close-btn {
-  background: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: none;
-  font-size: var(--text-2);
-  line-height: 1;
-  padding: var(--space-1);
-  cursor: pointer;
-  color: var(--muted-foreground);
-  transition: color var(--transition-fast);
-
-  &:hover {
-    color: var(--foreground);
-  }
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
 }
+.close-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 
-.modal-body {
-  padding: var(--space-6);
-}
-
-/* ── Settings ──────────────────────────────────────────────────────────── */
-
-.settings-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-}
-
+.settings-body { display: flex; flex-direction: column; gap: var(--space-6); }
 .settings-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 
-  & label {
-    font-size: var(--text-7);
-    font-weight: var(--font-semibold);
-    color: var(--foreground);
-  }
-
-  & select {
-    width: 100%;
-    padding: var(--space-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-medium);
-    background: var(--background);
-    color: var(--foreground);
-    font-size: var(--text-7);
-
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  }
-
-  & .hint {
-    font-size: var(--text-8);
-    color: var(--muted-foreground);
-    margin: 0;
-  }
+  & > label { font-size: 13px; font-weight: var(--fw-semibold); color: var(--text); }
 }
 
 .field-label {
   display: block;
-  font-size: var(--text-7);
-  font-weight: var(--font-semibold);
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
   margin-bottom: var(--space-1);
 }
-
 .copy-row {
   display: flex;
   gap: var(--space-2);
@@ -483,35 +533,22 @@
   & input {
     flex: 1;
     min-width: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-8);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
   }
 }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+.error-msg { font-size: 13px; color: var(--danger); margin: 0; }
 
-.hint {
-  font-size: var(--text-7);
-  color: var(--muted-foreground);
-  margin: 0;
-}
-
-.error-msg {
-  font-size: var(--text-7);
-  color: var(--danger);
-  margin: 0;
-}
-
-/* ── Spinner (oat utility) ─────────────────────────────────────────────── */
+/* ── Spinner ───────────────────────────────────────────────────────────── */
 
 .spinner {
-  width: 2rem;
-  height: 2rem;
+  width: 32px;
+  height: 32px;
+  margin: var(--space-4) auto;
   border: 3px solid var(--border);
-  border-top-color: var(--primary);
+  border-top-color: var(--accent);
   border-radius: var(--radius-full);
   animation: spin 0.7s linear infinite;
-  margin: var(--space-4) auto;
 }
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
