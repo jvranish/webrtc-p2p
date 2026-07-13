@@ -584,7 +584,7 @@ describe("PeerMesh", function () {
       assertEq(connectedPeer.id, "peer-b");
 
       // Close A's side of the connection to B
-      connectedPeer.peerConnection.close();
+      connectedPeer.connection.close();
 
       // A should detect its own connection closed
       const disconnectedId = await disconnects.recv();
