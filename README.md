@@ -1,19 +1,17 @@
 # WebRTC Peer-to-Peer Video Conferencing
 
-Serverless peer-to-peer video conferencing with no build step and no central server. Peers exchange SDP tokens manually (copy/paste or shareable links) to form a full-mesh network using public STUN servers only.
+Serverless peer-to-peer video conferencing with no central coordinating or relay server. Peers exchange SDP tokens manually (copy/paste or shareable links) to form a full-mesh network using public STUN servers only.
 
 **Hosted on github pages**: https://jvranish.github.io/webrtc-p2p/
 
 ## Features
 
-- **True peer-to-peer**: No central server required for signaling or media
-- **Manual token exchange**: Copy/paste or shareable links for initial connection
-- **Automatic mesh formation**: After first connection, new peers automatically connect to all existing peers
-- **No build step**: Pure ES modules served directly to the browser
-- **Chat messaging**: Real-time chat between all connected peers
-- **Screen sharing**: Share your screen with other participants
+Video, audio, chat, and screen sharing. Everyone connects directly to everyone else, so your media never passes through a server. Inviting someone requires generating a unique link per person — a little tedious, but it's what makes the whole thing work without a server.
+
 
 ## Quick Start
+
+There are no dynamic server components, the app can be served statically.
 
 1. **Start a local server** from the repository root:
    ```bash
@@ -29,24 +27,6 @@ Serverless peer-to-peer video conferencing with no build step and no central ser
    - Second peer opens the link and copies the answer token
    - First peer pastes the answer token
    - All subsequent peers automatically connect to the full mesh
-
-## How It Works
-
-### Join Flow (No Server Required)
-
-1. **Existing peer (A)** generates an offer → shareable link with `#offer=BASE64`
-2. **New peer (C)** opens the link, creates an answer → displays answer token
-3. **Peer A** pastes answer token → A↔C data channel opens
-4. **On connect**, each side sends the other a full `TOPOLOGY` snapshot; entries are gossiped onward via `TOPOLOGY_UPDATE` (versioned, last-write-wins)
-5. **For each known-but-unconnected pair**, the lexicographically lower ID floods a `RELAY_OFFER` through the mesh (deduped by `msgId`); the target floods back a `RELAY_ANSWER`
-6. **Full mesh formed** — manual copy-paste only needed once. A 30s anti-entropy interval re-gossips, prunes departed peers, and retries missing connections.
-
-### Architecture
-
-- **No build step**: Pure ES modules with import maps
-- **Reactive UI**: Uses `scaffold-html` for efficient template-based rendering
-- **WebRTC mesh**: Custom `PeerMesh` class manages all peer connections
-- **Relay signaling**: Data channels relay connection offers/answers for mesh formation
 
 ## Development
 
@@ -70,37 +50,13 @@ npx http-server -p 5501
 npx run-page http://localhost:5501/tests.html
 ```
 
-### Project Structure
-
-```
-src/
-├── app/
-│   ├── main.js           # Entry point
-│   ├── state.js          # Application state management
-│   ├── actions.js        # Mesh→dispatch wiring, message/media handling
-│   ├── mesh.js           # PeerMesh class (WebRTC mesh logic)
-│   ├── peer-connection.js# Low-level WebRTC connection wrapper
-│   ├── icons.js          # Inline SVG icon set
-│   ├── components/       # UI components
-│   └── app.css           # App-specific styles
-├── deps/
-│   └── scaffold-html/    # Reactive UI library
-tests/
-├── tests.html            # Test runner page
-├── test-runner.js        # Test execution
-├── test-helpers.js       # Test framework
-├── mesh-tests.js         # Real WebRTC mesh tests
-├── fake-network.js       # Deterministic in-memory transport + virtual clock
-├── sim-tests.js          # Protocol race-condition simulation tests
-└── utils/queue.js        # Async queue for test coordination
-```
-
 ## Technology Stack
 
-- **Pure JavaScript**: No transpilation or bundling required
+- **Pure JavaScript**: No transpilation or bundling — static types via JSDoc annotations checked by `tsc`
 - **ES Modules**: Native browser module support
 - **WebRTC**: Peer-to-peer data channels and media streams
 - **scaffold-html**: Lightweight reactive UI via tagged templates
+- **Browser-based tests**: Test suite runs directly in the browser (no Node.js test runner)
 
 ## Browser Support
 

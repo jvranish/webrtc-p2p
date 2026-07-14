@@ -56,12 +56,6 @@ sequenceDiagram
     Offerer->>Answerer: Connection ready
 ```
 
-### Data Channel Lifecycle
-- **Offerer**: Creates data channel during `pc.createOffer()`
-- **Answerer**: Receives data channel via `pc.ondatachannel` event
-- **Open**: Connection ready when `readyState === 'open'`
-- **Close**: Triggered by peer disconnect; fires `onDisconnected` callback
-
 ### Renegotiation (Track Changes)
 
 When media tracks are added or replaced after connection is established, perfect negotiation pattern prevents collision:
@@ -73,25 +67,17 @@ flowchart TD
     C --> D["Send RENEGOTIATE_OFFER over data channel"]
     D --> E["makingOffer = false"]
 
-    F["Receive RENEGOTIATE_OFFER"] --> G{"Collision check:<br/>makingOffer ||<br/>signalingState ≠ stable"}
-    G -->|No collision| H["Set remote offer"]
-    G -->|Collision &<br/>impolite peer| I["Ignore offer<br/>Let our offer win"]
+    F["Receive RENEGOTIATE_OFFER"] --> G{"Impolite peer AND<br/>collision?<br/>(!isPolite &&<br/>makingOffer ||<br/>signalingState ≠ stable)"}
+    G -->|Yes| I["Ignore offer<br/>Let our offer win"]
+    G -->|No| H["Set remote offer,<br/>create & send<br/>RENEGOTIATE_ANSWER"]
 
-    H --> J{"I am<br/>polite?"}
-    J -->|Yes| K["Create answer SDP"]
-    J -->|No| L["Ignore - wait<br/>for answer to our offer"]
-
-    K --> M["Send RENEGOTIATE_ANSWER"]
-
-    N["Receive RENEGOTIATE_ANSWER"] --> O["Set remote answer"]
-    O --> P["Connection renegotiated"]
-    M --> P
+    J["Receive RENEGOTIATE_ANSWER"] --> K["Set remote answer"]
+    K --> L["Connection renegotiated"]
 
     style I fill:#fff4e6
-    style L fill:#fff4e6
 ```
 
-Key insight: By assigning "polite" role (answerer initiates connection), simultaneous offers are resolved deterministically — the impolite peer backs down and waits for an answer to its offer.
+Key insight: By assigning "polite" role to the answerer, simultaneous offers are resolved deterministically — the impolite peer (offerer) ignores incoming offers during a collision and waits for an answer to its own offer; the polite peer always yields.
 
 ---
 
@@ -105,8 +91,6 @@ Each peer maintains a distributed replica of the mesh topology:
 - **Authority**: Each peer is authoritative for its own entry; remote entries accepted if version > local version (last-write-wins)
 
 ### Bootstrap: Invite/Join Flow
-
-**High-level flow:**
 
 ```mermaid
 flowchart TD
@@ -125,40 +109,9 @@ flowchart TD
     K --> L["A ↔ J connection opens"]
     L --> M["A sends TOPOLOGY to J"]
     M --> N["J learns all peers A knows"]
-    N --> O["J initiates relay connections<br/>to A, C, D, ..."]
+    N --> O["J and existing peers initiate relay<br/>connections (lower ID initiates each pair)"]
     O --> P["Mesh fully connected"]
 ```
-
-**Detailed flow:**
-
-**Initiator (creates invite link):**
-1. Call `mesh.createInvite(myId, myName)`
-   - Create RTCPeerConnection + offer
-   - Return shareable link with base64-encoded offer token
-   - Return `acceptAnswer(answerToken)` callback
-
-2. User copies link to joiner
-
-**Joiner (accepts invite link):**
-1. Parse `#offer=BASE64` from URL
-2. Call `mesh.acceptInvite(offerInput, myId, myName)`
-   - Create RTCPeerConnection from offer SDP
-   - Generate answer SDP
-   - Begin connection asynchronously (fires `onPeerConnected` when data channel opens)
-   - Return answer token to user
-
-3. User copies answer token back to initiator
-
-**Initiator continues:**
-1. User pastes answer token
-2. Call `acceptAnswer(answerToken)`
-   - Set remote description (answer)
-   - Connection completes immediately (data channel already created on offerer side)
-
-**First connection established:**
-1. Initiator's mesh sends new peer its full topology via `TOPOLOGY` message
-2. New peer merges topology entries
-3. New peer initiates relay connections to all peers it learned about
 
 ### Mesh Formation: Relay Connections
 
@@ -201,13 +154,6 @@ sequenceDiagram
     A->>C: A↔C connection opens
 ```
 
-**Flow details:**
-- A creates offer and floods to all neighbors (B, D)
-- Each relay peer (B, D) forwards to others (except sender) — this spreads the message through the mesh
-- C receives the offer (via B or D), recognizes `to === myId`, and processes it
-- C sends answer back via same flooding mechanism
-- A receives the answer and completes the connection
-
 **Deduplication:** Each relay message has a `msgId` (UUID). Seen-set (bounded to 500 entries) prevents re-processing messages that loop back.
 
 **Offer Collision Prevention:** Peer with lexicographically lower ID initiates the relay offer. This ensures only one side sends an offer, preventing simultaneous offer situations.
@@ -248,10 +194,6 @@ flowchart TD
 - Entries with no mutual-edge path from this peer (both sides list each other) are marked unreachable; if still unreachable after a 90s grace period they are pruned
 - The grace period covers transient asymmetry while gossip converges (e.g. a joining peer's entry arriving before its neighbor's updated entry)
 
-**State Tracking:**
-- Maintaining full topology allows decision-making about who should initiate relay connections
-- Prevents duplicate connection attempts between same two peers (lexicographic tie-breaking: lower ID initiates)
-
 ---
 
 ## Message Types
@@ -274,13 +216,10 @@ All messages are JSON strings sent over data channels.
 - `PEER_META`: Name change broadcast
 - `CHAT`: Chat message with text and timestamp
 - `SCREEN_SHARE`: Screen share active/inactive notification
-- `PEER_LEFT`: Graceful disconnect signal
 
 ---
 
 ## UI ↔ State ↔ Mesh Data Flow
-
-**Architecture overview:**
 
 ```mermaid
 flowchart TB
@@ -306,148 +245,11 @@ flowchart TB
     style RemotePeers fill:#fff3e0
 ```
 
-### Unidirectional Flow: UI → State → Mesh
+**UI → State → Mesh:** Actions in `actions.js` coordinate state dispatch and mesh operations. State updates always happen first (optimistic UI); mesh broadcasts are side effects.
 
-**User Action → State Change → Mesh Action:**
+**Mesh → State → UI:** Mesh callbacks always trigger `dispatch()`. UI automatically reflects state via the re-render loop — no imperative DOM manipulation.
 
-```mermaid
-sequenceDiagram
-    participant UI
-    participant Action as actions.js
-    participant State
-    participant Mesh
-
-    UI->>Action: User clicks "Send Chat"
-    Action->>State: dispatch('addChatMessage', ...)
-    State->>State: Add message to messages array
-    State->>UI: scheduleRender()
-    UI->>UI: Re-render with new message
-    Action->>Mesh: mesh.broadcast(CHAT message)
-    Mesh->>Mesh: Send to all peers
-```
-
-**Pattern:** Actions in `actions.js` coordinate state dispatch + mesh operations. State updates always happen first; mesh broadcasts are side effects. This ensures optimistic UI updates.
-
-### Unidirectional Flow: Mesh → State → UI
-
-**Mesh Event → State Change → UI Re-render:**
-
-```mermaid
-sequenceDiagram
-    participant RemotePeer as Remote Peer
-    participant Mesh
-    participant Action as Callback Handler
-    participant State
-    participant UI
-
-    RemotePeer->>Mesh: RELAY_OFFER via data channel
-    Mesh->>Mesh: Accept offer, create connection
-    Mesh->>Mesh: Data channel opens
-    Mesh->>Action: onPeerConnected(peer)
-    Action->>State: dispatch('peerConnected', peer)
-    State->>State: Add peer to peers map
-    State->>UI: scheduleRender()
-    UI->>UI: Render new peer video element
-```
-
-**Pattern:** Mesh callbacks always trigger `dispatch()`. UI automatically reflects state via re-render loop. No imperative DOM manipulation.
-
-### Media Track Lifecycle
-
-**Adding Tracks (starts camera):**
-
-```mermaid
-sequenceDiagram
-    participant UI
-    participant State
-    participant Mesh
-    participant LocalPCs as Peer Connections
-    participant RemotePeers as Remote Peers
-
-    UI->>UI: Click "Start Camera"
-    UI->>UI: getUserMedia()
-    UI->>State: dispatch('setLocalStream', stream)
-    State->>State: Update localStream
-    State->>UI: scheduleRender() → UI re-renders
-
-    UI->>Mesh: mesh.addLocalTracks(tracks)
-    Mesh->>LocalPCs: addTrack() on each connection
-    LocalPCs->>LocalPCs: negotiationneeded event
-    LocalPCs->>LocalPCs: Send RENEGOTIATE_OFFER
-
-    LocalPCs->>RemotePeers: Offer via data channel
-    RemotePeers->>RemotePeers: Receive RENEGOTIATE_OFFER
-    RemotePeers->>RemotePeers: Send RENEGOTIATE_ANSWER
-    RemotePeers->>RemotePeers: ontrack event: new stream
-    RemotePeers->>Mesh: onRemoteStream callback
-    Mesh->>State: dispatch('setPeerStream', peerId, stream)
-    State->>UI: scheduleRender() → video elements update
-```
-
-**Replacing Tracks (switch device or screen share):**
-
-```mermaid
-flowchart TD
-    A["User clicks 'Screen Share' or switches device"] --> B["Action: mesh.replaceVideoTrack(newTrack)<br/>or mesh.replaceAudioTrack(newTrack)"]
-    B --> C["For each peer connection:<br/>sender.replaceTrack(newTrack)"]
-    C --> D["negotiationneeded event fires"]
-    D --> E["Renegotiation messages exchanged<br/>RENEGOTIATE_OFFER → RENEGOTIATE_ANSWER"]
-    E --> F["Remote peers receive ontrack<br/>with same stream ID, new track"]
-    F --> G["Video element auto-updates<br/>MediaStream object unchanged,<br/>track inside it is new"]
-```
-
-Key insight: Track replacement reuses the same MediaStream and stream ID, so video elements automatically display the new track without needing to re-bind.
-
----
-
-## State Machines by Feature
-
-### Invite Flow (Initiator)
-
-```mermaid
-stateDiagram-v2
-    state "waiting-answer" as waiting_answer
-
-    [*] --> idle
-
-    idle --> offering : startInvite()
-    offering --> idle : error / setInviteError()
-    offering --> waiting_answer : offer created / setOfferReady(link)
-    waiting_answer --> idle : acceptAnswer() / connection established
-    waiting_answer --> idle : cancelInvite()
-    waiting_answer --> idle : error / setInviteError()
-
-    idle --> [*]
-```
-
-### Join Flow (Joiner)
-
-```mermaid
-stateDiagram-v2
-    state "showing-answer" as showing_answer
-
-    [*] --> idle
-
-    idle --> processing : handleOffer(token)
-    processing --> idle : error / setJoinError()
-    processing --> showing_answer : answer created / setAnswerToken()
-    showing_answer --> idle : user confirms / answer sent, awaiting connection
-    showing_answer --> idle : error / setJoinError()
-    showing_answer --> idle : peerConnected callback / auto-close when mesh ready
-
-    idle --> [*]
-```
-
-### Media State
-```
-localStream: null → getUserMedia() → MediaStream with tracks
-  → addLocalTracks() to mesh → renegotiation → remote peers receive
-
-screenShareActive: false → startScreenShare() → true
-  → replaceVideoTrack(screenTrack) → renegotiation
-  → stopScreenShare() → false
-  → replaceVideoTrack(cameraTrack) → renegotiation
-```
+**Track replacement** reuses the same MediaStream and stream ID, so video elements automatically display the new track without re-binding.
 
 ---
 
