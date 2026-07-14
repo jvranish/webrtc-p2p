@@ -51,6 +51,7 @@ export async function startInvite() {
 /** @param {string} answerInput */
 export async function submitAnswer(answerInput) {
   if (!acceptAnswerFn) return;
+  dispatch('setConnecting');
   try {
     await acceptAnswerFn(answerInput);
     acceptAnswerFn = null;

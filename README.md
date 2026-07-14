@@ -47,7 +47,7 @@ python -m http.server 5501
 npx http-server -p 5501
 
 # Terminal 2: Run tests
-npx run-page http://localhost:5501/tests.html
+npx --package run-page@1 run-page http://localhost:5501/tests.html
 ```
 
 ## Technology Stack

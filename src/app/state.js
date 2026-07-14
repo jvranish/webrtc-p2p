@@ -76,7 +76,7 @@ export class AppState {
 
   settingsOpen = false;
 
-  /** @type {'idle' | 'offering' | 'waiting-answer'} */
+  /** @type {'idle' | 'offering' | 'waiting-answer' | 'connecting'} */
   invitePhase = 'idle';
 
   /** @type {string | null} */
@@ -178,10 +178,15 @@ export class AppState {
     this.invitePhase = 'waiting-answer';
   }
 
+  setConnecting() {
+    this.invitePhase = 'connecting';
+    this.inviteError = null;
+  }
+
   /** @param {string} msg */
   setInviteError(msg) {
     this.inviteError = msg;
-    this.invitePhase = 'idle';
+    this.invitePhase = 'waiting-answer';
   }
 
   cancelInvite() {

@@ -31,6 +31,25 @@ const InviteModal = asComponent({
       `;
     }
 
+    if (props.invitePhase === 'connecting') {
+      return html`
+        <div class="modal-overlay">
+          <div class="modal" role="dialog" aria-modal="true" aria-label="Invite someone">
+            <header>
+              <h2>Invite someone</h2>
+              <p>Connecting to peer…</p>
+            </header>
+            <div>
+              <div class="spinner" aria-label="Connecting"></div>
+            </div>
+            <footer>
+              <button onclick=${() => cancelInvite()}>Cancel</button>
+            </footer>
+          </div>
+        </div>
+      `;
+    }
+
     const copyLink = () => {
       if (props.offerLink) navigator.clipboard.writeText(props.offerLink);
     };
