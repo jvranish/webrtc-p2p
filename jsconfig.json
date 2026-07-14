@@ -24,7 +24,9 @@
     }
   },
   "include": [
-    "src/**/*.{js,d.ts}",
+    "src/**/*.js",
+    "src/**/*.ts",
+    "src/**/*.d.ts",
     "tests/**/*.js"
   ],
 }
