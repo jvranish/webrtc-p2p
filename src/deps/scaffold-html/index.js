@@ -5,35 +5,32 @@ export { RenderedView } from "./view/index.js";
 export { asComponent } from "./view/component.js";
 export { PopulatedTemplate } from "./view/template/template-builder.js";
 
-/** @import {ComponentContext, ComponentDefinition, ComponentInstance, Component} from "./view/component.js" */
-
 /**
  * @template S
  * @template P
  * @template {Record<string, typeof HTMLElement>} R
- * @typedef {ComponentContext<S, P, R>} ComponentContext
+ * @typedef {import("./view/component.js").ComponentContext<S, P, R>} ComponentContext
  */
 
 /**
  * @template S, P
  * @template {Record<string, typeof HTMLElement>} R
- * @typedef {ComponentDefinition<S, P, R>} ComponentDefinition
+ * @typedef {import("./view/component.js").ComponentDefinition<S, P, R>} ComponentDefinition
  */
 
 /**
  * @template S, P
  * @template {Record<string, typeof HTMLElement>} R
- * @typedef {ComponentInstance<S, P, R>} ComponentInstance
+ * @typedef {import("./view/component.js").ComponentInstance<S, P, R>} ComponentInstance
  */
 
 /**
  * @template S, P
  * @template {Record<string, typeof HTMLElement>} R
- * @typedef {Component<S, P, R>} Component
+ * @typedef {import("./view/component.js").Component<S, P, R>} Component
  */
 
-/** @import {Renderable} from "./view/view-types.js" */
-/** @typedef {Renderable} Renderable */
+/** @typedef {import("./view/view-types.js").Renderable} Renderable */
 
 /**
  * Render a value into the DOM.

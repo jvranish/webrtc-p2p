@@ -24,7 +24,7 @@ import {
  * @import {TagNode, AstNode, CommentNode, AttributeLiteralValue, AttributeRef, AttributeHole, AttributeSplatHole, Attribute, ElementHole} from "./html-types.js"
  */
 
-/** @type {(value: unknown) => value is { [name: string]: unknown } | null} */
+/** @type {(value: unknown) => value is object | null} */
 const isObject = (value) => typeof value === "object";
 
 // HTML void elements that cannot have children or closing tags

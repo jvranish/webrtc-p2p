@@ -18,8 +18,8 @@ python -m http.server 5501
 # or
 npx http-server -p 5501
 
-# Type check (pinned: TS 7.x flags errors in vendored src/deps)
-npx --package typescript@5.9 tsc --noEmit -p ./jsconfig.json
+# Type check
+npx --package typescript@7 tsc --noEmit -p ./jsconfig.json
 
 # Run tests (requires server running on port 5501)
 npx run-page http://localhost:5501/tests.html
@@ -33,13 +33,9 @@ Tests are in `tests/` directory and run in the browser via `tests.html`. The tes
 - `test-helpers.js` - Test framework (`describe`, `it`, assertions, barriers)
 - `test-runner.js` - Runs tests and displays results
 - `utils/queue.js` - Async queue for coordinating test messages
-- `tests.js` - Mesh connection tests covering full join flow and message exchange (real WebRTC)
+- `mesh-tests.js` - Mesh connection tests covering full join flow and message exchange (real WebRTC)
 - `fake-network.js` - Deterministic in-memory transport + virtual clock (drop/hold/sever fault injection, seeded interleaving, delivery trace)
 - `sim-tests.js` - Protocol race-condition tests running PeerMesh on the FakeNetwork; every schedule is reproducible, failures log the delivery trace
-
-The sim tests are DOM-free and can also run in Node for quick iteration
-(shim `globalThis.location`, import `tests/sim-tests.js`, run `tests` from
-test-helpers).
 
 Please run the tests after every major change.
 
@@ -51,15 +47,17 @@ Pure ES modules served directly. Import aliases are configured in two places tha
 - `index.html` → `<script type="importmap">` (for the browser)
 
 ### Key Libraries (vendored in `src/deps/`)
-- **`scaffold-html`** — reactive UI via tagged template literals. Import as `"scaffold-html"`. See `src/deps/scaffold-html/README.md` and `COMPONENTS.md`.
-- **`oat`** — CSS component library. Include `src/deps/oat/css/oat.css` and `src/deps/oat/js/index.js`. See CSS variables in `src/deps/oat/css/01-theme.css`.
+- **`scaffold-html`** — reactive UI via tagged template literals. Import as `"scaffold-html"`. See `src/deps/scaffold-html/README.md`.
 
 ### App Structure (`src/app/`)
 - **`mesh.js`** — `PeerMesh` class: manages all RTCPeerConnections, handles relay signaling for mesh formation
+- **`peer-connection.js`** — low-level WebRTC connection wrapper (`Connection` class, ICE helpers, renegotiation)
 - **`state.js`** — `AppState` class with all app state + `dispatch()` function + `scheduleRender()`
+- **`actions.js`** — wires `PeerMesh` to `dispatch`; handles incoming messages and media actions
 - **`main.js`** — entry point: sets up render loop, handles `#offer=` URL fragment on load
+- **`icons.js`** — inline SVG icon set (inherits `currentColor`)
 - **`components/`** — UI components (functions returning `html` templates or `asComponent` instances)
-- **`app.css`** — app-specific styles on top of oat
+- **`app.css`** — app-specific styles
 
 ### Join Flow (No Server)
 1. Existing peer (A) generates an offer → shareable link `#offer=BASE64`
@@ -129,3 +127,4 @@ For complex types, use `.ts` files alongside `.js`:
 - Use `{ key, value }` objects in arrays for keyed lists
 - `#refName` attribute syntax creates DOM refs; refs are **unavailable on first render**
 - `asComponent` for stateful components; plain functions for stateless ones
+- See `src/deps/scaffold-html/README.md` for full API docs

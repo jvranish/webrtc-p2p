@@ -14,7 +14,7 @@ const registry = {
   ComponentView,
 };
 
-/** @typedef {InstanceType<registry[keyof registry]>} View */
+/** @typedef {InstanceType<(typeof registry)[keyof typeof registry]>} View */
 
 export class RenderedView {
   /** @param {View} view */

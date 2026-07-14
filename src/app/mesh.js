@@ -211,14 +211,6 @@ export class PeerMesh {
     return [...this.#topology.values()].map(e => ({ ...e, neighbors: [...e.neighbors] }));
   }
 
-  /** Log the current known topology in a readable format. */
-  #logTopology() {
-    const rows = [...this.#topology.values()].map(e =>
-      `  ${e.id === this.#myId ? '*' : ' '}${e.id.slice(0, 8)} "${e.name}" v${e.version} → [${e.neighbors.map(n => n.slice(0, 8)).join(', ')}]`
-    );
-    console.log(`[mesh] topology (${this.#topology.size} known, ${this.#peers.size} connected):\n${rows.join('\n')}`);
-  }
-
   /**
    * Build connection callbacks for a given peer.
    * @param {PeerIdRef} peerIdRef - mutable ref so offerer can update peerId after answer arrives
@@ -257,7 +249,6 @@ export class PeerMesh {
     this.#myName = myName;
     this.#updateMyEntry();
 
-    console.log(`[mesh] createInvite: myId=${myId.slice(0, 8)} name="${myName}"`);
 
     /** @type {PeerIdRef} */
     const peerIdRef = { peerId: 'pending' };
@@ -278,7 +269,6 @@ export class PeerMesh {
     const acceptAnswer = async (/** @type {string} */ input) => {
       const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
 
-      console.log(`[mesh] acceptAnswer: peer=${answerData.peerId.slice(0, 8)} name="${answerData.name}"`);
 
       // Update the peer ID reference before setting remote description
       // so that any ontrack events that fire will have the correct peer ID
@@ -305,7 +295,6 @@ export class PeerMesh {
     this.#updateMyEntry();
 
     const offerData = this.#parseToken(offerInput);
-    console.log(`[mesh] acceptInvite: myId=${myId.slice(0, 8)} name="${myName}" offerFrom=${offerData.peerId.slice(0, 8)} name="${offerData.name}"`);
 
     /** @type {PeerIdRef} */
     const peerIdRef = { peerId: offerData.peerId };
@@ -482,7 +471,6 @@ export class PeerMesh {
       if (since === undefined) {
         this.#unreachableSince.set(id, now);
       } else if (now - since > this.#unreachableGraceMs) {
-        console.log(`[mesh] pruning departed peer ${id.slice(0, 8)} from topology`);
         this.#topology.delete(id);
         this.#unreachableSince.delete(id);
         this.#relayAttempts.delete(id);
@@ -559,14 +547,12 @@ export class PeerMesh {
       // Already connected (e.g. simultaneous invite + relay). Discard the
       // loser: mark its callbacks inert so closing it doesn't tear down the
       // winning connection's peer entry.
-      console.log(`[mesh] duplicate connection to ${id.slice(0, 8)}, discarding`);
       peerIdRef.discarded = true;
       connection.close();
       return;
     }
     peerIdRef.connection = connection;
 
-    console.log(`[mesh] peer connected: ${id.slice(0, 8)} "${name}"`);
 
     /** @type {ConnectedPeer} */
     const peer = { id, name, connection };
@@ -594,7 +580,6 @@ export class PeerMesh {
       }
     }
 
-    this.#logTopology();
     this.#startAntiEntropy();
   }
 
@@ -602,7 +587,6 @@ export class PeerMesh {
   #handlePeerDisconnected(peerId) {
     const peer = this.#peers.get(peerId);
     if (!peer) return;
-    console.log(`[mesh] peer disconnected: ${peerId.slice(0, 8)}`);
     this.#peers.delete(peerId);
     peer.connection.close(); // release the RTCPeerConnection (idempotent)
     this.#callbacks.onPeerDisconnected(peerId);
@@ -617,7 +601,6 @@ export class PeerMesh {
       p.connection.sendData(updateMsg);
     }
     this.#pruneTopology();
-    this.#logTopology();
   }
 
   /**
@@ -634,14 +617,12 @@ export class PeerMesh {
       }
       message = /** @type {MeshMessage} */ (parsed);
     } catch {
-      console.warn(`[mesh] dropping malformed message from ${fromId.slice(0, 8)}`);
       return;
     }
 
     if (message.type === 'TOPOLOGY') {
       const updated = this.#mergeTopology(message.entries);
       if (updated.length > 0) {
-        console.log(`[mesh] TOPOLOGY from ${fromId.slice(0, 8)}: merged ${updated.length} new/updated entries`);
         // Fan-out newly-learned entries to all other peers (same as TOPOLOGY_UPDATE)
         for (const entry of updated) {
           const str = JSON.stringify(/** @type {TopologyUpdateMessage} */({ type: 'TOPOLOGY_UPDATE', entry }));
@@ -650,27 +631,22 @@ export class PeerMesh {
           }
         }
         this.#checkForNewPeers();
-        this.#logTopology();
       }
     } else if (message.type === 'TOPOLOGY_UPDATE') {
       const updated = this.#mergeTopology([message.entry]);
       if (updated.length > 0) {
-        console.log(`[mesh] TOPOLOGY_UPDATE from ${fromId.slice(0, 8)}: ${message.entry.id.slice(0, 8)} "${message.entry.name}" v${message.entry.version} neighbors=[${message.entry.neighbors.map(n => n.slice(0, 8)).join(', ')}]`);
         // Fan-out: re-gossip to all peers except the sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
           if (p.id !== fromId) p.connection.sendData(str);
         }
         this.#checkForNewPeers();
-        this.#logTopology();
       }
     } else if (message.type === 'RELAY_OFFER') {
       if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
-        console.log(`[mesh] RELAY_OFFER for me from ${message.from.slice(0, 8)} "${message.name}"`);
         this.#handleRelayOffer(message).catch(err => console.error('PeerMesh: handleRelayOffer failed', err));
       } else {
-        console.log(`[mesh] RELAY_OFFER relay: ${message.from.slice(0, 8)} → ${message.to.slice(0, 8)}`);
         // Flood to all peers except sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
@@ -680,10 +656,8 @@ export class PeerMesh {
     } else if (message.type === 'RELAY_ANSWER') {
       if (this.#markSeen(message.msgId)) return;
       if (message.to === this.#myId) {
-        console.log(`[mesh] RELAY_ANSWER for me from ${message.from.slice(0, 8)}`);
         this.#handleRelayAnswer(message).catch(err => console.error('PeerMesh: handleRelayAnswer failed', err));
       } else {
-        console.log(`[mesh] RELAY_ANSWER relay: ${message.from.slice(0, 8)} → ${message.to.slice(0, 8)}`);
         // Flood to all peers except sender
         const str = JSON.stringify(message);
         for (const p of this.#peers.values()) {
@@ -703,7 +677,6 @@ export class PeerMesh {
     if (this.#peers.has(targetId)) return;
     if (this.#pendingOut.has(targetId)) return;
 
-    console.log(`[mesh] initiating relay connection to ${targetId.slice(0, 8)} "${targetName}"`);
 
     /** @type {PeerIdRef} */
     const peerIdRef = { peerId: targetId };
@@ -725,7 +698,6 @@ export class PeerMesh {
       cancel();
       const attempts = (this.#relayAttempts.get(targetId) ?? 0) + 1;
       this.#relayAttempts.set(targetId, attempts);
-      console.warn(`[mesh] relay connection to ${targetId.slice(0, 8)} timed out (attempt ${attempts}/${RELAY_MAX_ATTEMPTS})`);
       this.#checkForNewPeers();
     }, this.#relayTimeoutMs);
 
@@ -748,7 +720,6 @@ export class PeerMesh {
   /** @param {RelayOfferMessage} message */
   async #handleRelayOffer(message) {
     if (this.#peers.has(message.from)) {
-      console.log(`[mesh] RELAY_OFFER from ${message.from.slice(0, 8)}: already connected, ignoring`);
       return; // already connected
     }
 
@@ -786,14 +757,12 @@ export class PeerMesh {
   async #handleRelayAnswer(message) {
     const pending = this.#pendingOut.get(message.from);
     if (!pending) {
-      console.warn(`[mesh] RELAY_ANSWER from ${message.from.slice(0, 8)}: no pending connection, ignoring`);
       return;
     }
     if (message.replyTo !== pending.msgId) {
       // Answer to an earlier, already-abandoned offer (e.g. it arrived after
       // our timeout retried). The current attempt is still waiting for its
       // own answer — keep it.
-      console.warn(`[mesh] RELAY_ANSWER from ${message.from.slice(0, 8)}: stale (for an abandoned offer), ignoring`);
       return;
     }
     this.#pendingOut.delete(message.from);
@@ -807,7 +776,6 @@ export class PeerMesh {
       pending.cancel();
       const attempts = (this.#relayAttempts.get(message.from) ?? 0) + 1;
       this.#relayAttempts.set(message.from, attempts);
-      console.error(`[mesh] relay handshake with ${message.from.slice(0, 8)} failed (attempt ${attempts}/${RELAY_MAX_ATTEMPTS})`, err);
     }
   }
 }

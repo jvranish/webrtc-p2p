@@ -24,12 +24,7 @@
     }
   },
   "include": [
-    "src/**/*.js",
-    "tests/**/*.js",
-    "src/**/*.mjs",
-    "src/types/**/*.d.ts"
+    "src/**/*.{js,d.ts}",
+    "tests/**/*.js"
   ],
-  "exclude": [
-    "tests/e2e"
-  ]
 }

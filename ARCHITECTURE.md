@@ -290,13 +290,13 @@ flowchart TB
     RemotePeers["Remote Peers<br/>(network)"]
 
     UI -->|User clicks| Handler["Event Handler<br/>calls actions.js"]
-    Handler -->|dispatch<br/>method, args| State
-    State -->|state.method()<br/>scheduleRender| UI
+    Handler -->|dispatch method+args| State
+    State -->|state.method / scheduleRender| UI
     Handler -->|mesh.operation| Mesh
 
-    Mesh -->|data channel<br/>message| RemotePeers
-    RemotePeers -->|data channel<br/>message| Mesh
-    Mesh -->|callback:<br/>onPeerConnected| Handler
+    Mesh -->|data channel message| RemotePeers
+    RemotePeers -->|data channel message| Mesh
+    Mesh -->|callback: onPeerConnected| Handler
     Handler -->|dispatch| State
     State -->|scheduleRender| UI
 
@@ -406,14 +406,16 @@ Key insight: Track replacement reuses the same MediaStream and stream ID, so vid
 
 ```mermaid
 stateDiagram-v2
+    state "waiting-answer" as waiting_answer
+
     [*] --> idle
 
-    idle -->|startInvite()| offering
-    offering -->|error| idle: setInviteError()
-    offering -->|offer created| waiting-answer: setOfferReady(link)
-    waiting-answer -->|acceptAnswer()| idle: connection established
-    waiting-answer -->|cancelInvite()| idle
-    waiting-answer -->|error| idle: setInviteError()
+    idle --> offering : startInvite()
+    offering --> idle : error / setInviteError()
+    offering --> waiting_answer : offer created / setOfferReady(link)
+    waiting_answer --> idle : acceptAnswer() / connection established
+    waiting_answer --> idle : cancelInvite()
+    waiting_answer --> idle : error / setInviteError()
 
     idle --> [*]
 ```
@@ -422,14 +424,16 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
+    state "showing-answer" as showing_answer
+
     [*] --> idle
 
-    idle -->|handleOffer(token)| processing
-    processing -->|error| idle: setJoinError()
-    processing -->|answer created| showing-answer: setAnswerToken()
-    showing-answer -->|user confirms| idle: answer sent, awaiting connection
-    showing-answer -->|error| idle: setJoinError()
-    showing-answer -->|peerConnected callback| idle: auto-close when mesh ready
+    idle --> processing : handleOffer(token)
+    processing --> idle : error / setJoinError()
+    processing --> showing_answer : answer created / setAnswerToken()
+    showing_answer --> idle : user confirms / answer sent, awaiting connection
+    showing_answer --> idle : error / setJoinError()
+    showing_answer --> idle : peerConnected callback / auto-close when mesh ready
 
     idle --> [*]
 ```

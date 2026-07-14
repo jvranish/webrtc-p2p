@@ -4,14 +4,7 @@
       "Bash(npx --package typescript tsc:*)",
       "Bash(npx run-page:*)",
       "Bash(lsof:*)",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages"
+      "Bash(npx --package typescript@7 tsc --noEmit -p ./jsconfig.json)"
     ],
     "deny": [],
     "ask": []
