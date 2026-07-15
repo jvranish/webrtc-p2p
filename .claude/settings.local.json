@@ -1,10 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx --package typescript tsc:*)",
-      "Bash(npx run-page:*)",
+      "Bash(npx -y --package typescript tsc:*)",
+      "Bash(npx -y --package run-page@1 run-page:*)",
       "Bash(lsof:*)",
-      "Bash(npx --package typescript@7 tsc --noEmit -p ./jsconfig.json)"
+      "Bash(npx -y --package typescript@7 tsc --noEmit -p ./jsconfig.json)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []

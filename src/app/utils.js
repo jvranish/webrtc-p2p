@@ -17,26 +17,27 @@ export function cast(Type, value) {
 }
 
 /**
- * Encode an object as a URL-safe base64 token.
- * UTF-8 encodes first (btoa alone throws on chars > U+00FF, e.g. non-Latin names),
- * then uses the base64url alphabet so the token survives URL fragments unmangled.
+ * Encode an object as a URL-safe base64 token (deflate-raw compressed).
  * @param {unknown} obj
- * @returns {string}
+ * @returns {Promise<string>}
  */
-export function encodeToken(obj) {
+export async function encodeToken(obj) {
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const compressed = await new Response(cs.readable).arrayBuffer();
+  const bin = String.fromCharCode(...new Uint8Array(compressed));
   return btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 /**
- * Decode a token produced by encodeToken. Accepts both base64url and
- * standard base64 (with or without padding).
+ * Decode a token produced by encodeToken.
  * @param {string} encoded
- * @returns {unknown}
+ * @returns {Promise<unknown>}
  */
-export function decodeToken(encoded) {
+export async function decodeToken(encoded) {
   if (!encoded || !encoded.trim()) {
     throw new Error('Invalid token: empty or whitespace-only');
   }
@@ -48,7 +49,12 @@ export function decodeToken(encoded) {
       throw new Error('Invalid token: decodes to empty string');
     }
     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes));
+    const ds = new DecompressionStream('deflate-raw');
+    const writer = ds.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    const decompressed = await new Response(ds.readable).arrayBuffer();
+    return JSON.parse(new TextDecoder().decode(decompressed));
   } catch (err) {
     if (err instanceof Error && err.message.includes('Invalid token')) {
       throw err;

@@ -19,10 +19,10 @@ python -m http.server 5501
 npx http-server -p 5501
 
 # Type check
-npx --package typescript@7 tsc --noEmit -p ./jsconfig.json
+npx -y --package typescript@7 tsc --noEmit -p ./jsconfig.json
 
 # Run tests (requires server running on port 5501)
-npx run-page http://localhost:5501/tests.html
+npx -y --package run-page@1 run-page http://localhost:5501/tests.html
 ```
 
 Open `http://localhost:5501` for the app.

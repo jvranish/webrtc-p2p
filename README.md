@@ -33,7 +33,7 @@ There are no dynamic server components, the app can be served statically.
 ### Type Checking
 
 ```bash
-npx --package typescript@7 tsc --noEmit -p ./jsconfig.json
+npx -y --package typescript@7 tsc --noEmit -p ./jsconfig.json
 ```
 
 ### Running Tests
@@ -47,7 +47,7 @@ python -m http.server 5501
 npx http-server -p 5501
 
 # Terminal 2: Run tests
-npx --package run-page@1 run-page http://localhost:5501/tests.html
+npx -y --package run-page@1 run-page http://localhost:5501/tests.html
 ```
 
 ## Technology Stack

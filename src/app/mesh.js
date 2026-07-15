@@ -264,10 +264,10 @@ export class PeerMesh {
       sdp: offerSdp,
       type: 'offer'
     });
-    const offerLink = `${location.href.split('#')[0]}#offer=${encodeToken(tokenData)}`;
+    const offerLink = `${location.href.split('#')[0]}#offer=${await encodeToken(tokenData)}`;
 
     const acceptAnswer = async (/** @type {string} */ input) => {
-      const answerData = /** @type {TokenData} */ (decodeToken(input.trim()));
+      const answerData = /** @type {TokenData} */ (await decodeToken(input.trim()));
 
 
       // Update the peer ID reference before setting remote description
@@ -294,7 +294,7 @@ export class PeerMesh {
     this.#myName = myName;
     this.#updateMyEntry();
 
-    const offerData = this.#parseToken(offerInput);
+    const offerData = await this.#parseToken(offerInput);
 
     /** @type {PeerIdRef} */
     const peerIdRef = { peerId: offerData.peerId };
@@ -316,7 +316,7 @@ export class PeerMesh {
       sdp: answerSdp,
       type: 'answer'
     });
-    const answerToken = encodeToken(tokenData);
+    const answerToken = await encodeToken(tokenData);
 
     return answerToken;
   }
@@ -380,18 +380,18 @@ export class PeerMesh {
   /**
    * Parse a raw base64 token or a URL containing a fragment like `#offer=BASE64`.
    * @param {string} input
-   * @returns {TokenData}
+   * @returns {Promise<TokenData>}
    */
-  #parseToken(input) {
+  async #parseToken(input) {
     const trimmed = input.trim();
     const hashIdx = trimmed.indexOf('#');
     if (hashIdx === -1) {
-      return /** @type {TokenData} */ (decodeToken(trimmed));
+      return /** @type {TokenData} */ (await decodeToken(trimmed));
     }
     const fragment = trimmed.slice(hashIdx + 1);
     const eqIdx = fragment.indexOf('=');
     const raw = eqIdx === -1 ? fragment : fragment.slice(eqIdx + 1);
-    return /** @type {TokenData} */ (decodeToken(raw));
+    return /** @type {TokenData} */ (await decodeToken(raw));
   }
 
   /**
