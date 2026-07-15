@@ -94,6 +94,7 @@ export async function submitInviteAnswer(inviteId, answerInput) {
 }
 
 /** Discard a ticket (its unused link stops working). */
+/** @param {string} inviteId */
 export function removeInvite(inviteId) {
   acceptAnswerFns.delete(inviteId);
   dispatch('removeInvite', inviteId);

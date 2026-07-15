@@ -44,9 +44,7 @@ const InviteModal = asComponent({
             <span class="ticket-single">· one guest</span>
             <span class="ticket-head-spacer"></span>
             <span class=${['pill', status.cls]}>${status.label}</span>
-            ${inv.phase !== 'connected'
-              ? html`<button class="ticket-remove" onclick=${() => removeInvite(inv.id)} aria-label="Remove invite">${icon.close(14)}</button>`
-              : ''}
+            <button class="ticket-remove" onclick=${() => removeInvite(inv.id)} aria-label="Remove invite">${icon.close(14)}</button>
           </div>
 
           ${inv.phase === 'generating'
@@ -78,16 +76,18 @@ const InviteModal = asComponent({
 
     return html`
       <div class="modal-overlay" onclick=${() => closeInvites()}>
-        <div class="modal" onclick=${(/** @type {Event} */ e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Invite people">
+        <div class="modal invite-modal" onclick=${(/** @type {Event} */ e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Invite people">
           <div class="modal-header">
             <h2>Invite people</h2>
             <button class="close-btn" onclick=${() => closeInvites()} aria-label="Close">${icon.close()}</button>
           </div>
-          <div class="modal-body settings-body">
+          <div class="invite-scroll">
             <p class="invite-intro">Each link connects <strong>one guest only</strong>. Generate a separate invite for each person — once anyone joins, others you invite connect to the whole group automatically.</p>
             <div class="invite-list">
               ${props.invites.map((inv, i) => ({ key: inv.id, value: ticket(inv, i) }))}
             </div>
+          </div>
+          <div class="invite-footer">
             <button onclick=${() => newInvite()}>${icon.invite()} New invite</button>
           </div>
         </div>

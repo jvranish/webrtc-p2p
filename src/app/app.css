@@ -162,12 +162,14 @@ select:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 22px;
   letter-spacing: -0.02em;
   margin-right: var(--space-3);
+  flex-shrink: 0;
 }
 
 .nav-meta {
   font-size: 13px;
   color: var(--muted);
   margin-right: auto;
+  white-space: nowrap;
 }
 
 .nav-spacer { flex: 1; }
@@ -650,6 +652,26 @@ select:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .spinner.spinner--sm { width: 18px; height: 18px; margin: 0; border-width: 2px; }
 
+/* ── Invite modal fixed layout ────────────────────────────────────────── */
+
+.invite-modal {
+  overflow: hidden;
+}
+.invite-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.invite-footer {
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
 /* ── Spinner ───────────────────────────────────────────────────────────── */
 
 .spinner {
@@ -662,3 +684,28 @@ select:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Mobile header ────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .top-nav {
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  .nav-brand {
+    font-size: 17px;
+    margin-right: var(--space-1);
+  }
+  .nav-meta {
+    font-size: 12px;
+  }
+  .nav-spacer { display: none; }
+  .nav-divider { display: none; }
+  .nav-group { gap: var(--space-1); }
+  .nav-group button:not(.ctrl) {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+  .ctrl { width: 36px; height: 36px; }
+}

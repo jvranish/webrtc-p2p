@@ -56,7 +56,7 @@ const JoinModal = asComponent({
             <p class="hint">Once they paste your token, you'll be connected automatically.</p>
           </div>
           <footer>
-            <button class="primary" onclick=${() => dispatch('closeJoinModal')}>Done</button>
+            <button class="primary" onclick=${() => dispatch('closeJoinModal')}>Close</button>
           </footer>
         </div>
       </div>
