@@ -17,6 +17,16 @@
  * @property {MediaStream | null} stream
  */
 
+/**
+ * A single-use invite. One ticket connects one guest.
+ * @typedef {Object} InviteTicket
+ * @property {string} id
+ * @property {'generating' | 'ready' | 'connecting' | 'connected'} phase
+ * @property {string | null} offerLink
+ * @property {string | null} error
+ * @property {string | null} peerName  - set once a guest connects
+ */
+
 /** @type {(() => void) | null} */
 let _renderCallback = null;
 
@@ -76,14 +86,12 @@ export class AppState {
 
   settingsOpen = false;
 
-  /** @type {'idle' | 'offering' | 'waiting-answer' | 'connecting'} */
-  invitePhase = 'idle';
+  // --- Invite flow (multiple single-use tickets) ---
 
-  /** @type {string | null} */
-  offerLink = null;
+  inviteModalOpen = false;
 
-  /** @type {string | null} */
-  inviteError = null;
+  /** @type {InviteTicket[]} */
+  invites = [];
 
   /** @type {'idle' | 'processing' | 'showing-answer'} */
   joinPhase = 'idle';
@@ -167,32 +175,67 @@ export class AppState {
 
   // --- Invite flow ---
 
-  setInviting() {
-    this.invitePhase = 'offering';
-    this.inviteError = null;
+  openInvites() {
+    this.inviteModalOpen = true;
   }
 
-  /** @param {string} offerLink */
-  setOfferReady(offerLink) {
-    this.offerLink = offerLink;
-    this.invitePhase = 'waiting-answer';
+  closeInvites() {
+    // Keep tickets alive so answers can still be pasted after reopening.
+    this.inviteModalOpen = false;
   }
 
-  setConnecting() {
-    this.invitePhase = 'connecting';
-    this.inviteError = null;
+  /**
+   * Immutably update one ticket by id.
+   * @param {string} id
+   * @param {(t: InviteTicket) => InviteTicket} fn
+   */
+  #updateInvite(id, fn) {
+    this.invites = this.invites.map(t => t.id === id ? fn(t) : t);
   }
 
-  /** @param {string} msg */
-  setInviteError(msg) {
-    this.inviteError = msg;
-    this.invitePhase = 'waiting-answer';
+  /** @param {string} id */
+  addInvite(id) {
+    this.invites = [...this.invites, {
+      id,
+      phase: 'generating',
+      offerLink: null,
+      error: null,
+      peerName: null,
+    }];
   }
 
-  cancelInvite() {
-    this.invitePhase = 'idle';
-    this.offerLink = null;
-    this.inviteError = null;
+  /**
+   * @param {string} id
+   * @param {string} offerLink
+   */
+  setInviteReady(id, offerLink) {
+    this.#updateInvite(id, t => ({ ...t, phase: 'ready', offerLink, error: null }));
+  }
+
+  /** @param {string} id */
+  setInviteConnecting(id) {
+    this.#updateInvite(id, t => ({ ...t, phase: 'connecting', error: null }));
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} peerName
+   */
+  markInviteConnected(id, peerName) {
+    this.#updateInvite(id, t => ({ ...t, phase: 'connected', peerName, error: null }));
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} msg
+   */
+  setInviteError(id, msg) {
+    this.#updateInvite(id, t => ({ ...t, phase: 'ready', error: msg }));
+  }
+
+  /** @param {string} id */
+  removeInvite(id) {
+    this.invites = this.invites.filter(t => t.id !== id);
   }
 
   // --- Join flow ---

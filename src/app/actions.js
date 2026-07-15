@@ -2,11 +2,17 @@
 
 import { PeerMesh } from './mesh.js';
 import { dispatch, select } from './state.js';
+import { decodeToken, extractToken } from './utils.js';
 
 /** @import {MeshMessage} from './mesh.js' */
 
-/** @type {((answerInput: string) => Promise<void>) | null} */
-let acceptAnswerFn = null;
+/**
+ * Each pending invite ticket owns its own acceptAnswer closure, keyed by
+ * ticket id. A ticket's link is single-use: its closure completes exactly one
+ * connection, then is discarded.
+ * @type {Map<string, (answerInput: string) => Promise<void>>}
+ */
+const acceptAnswerFns = new Map();
 
 const mesh = new PeerMesh({
   onPeerConnected: (peer) => dispatch('peerConnected', peer),
@@ -35,35 +41,62 @@ export function setName(name) {
   mesh.broadcast({ type: 'PEER_META', name });
 }
 
-// --- Invite flow ---
+// --- Invite flow (multiple single-use tickets) ---
 
-export async function startInvite() {
-  dispatch('setInviting');
+/** Open the invite manager, seeding one ticket if the list is empty. */
+export function openInvites() {
+  dispatch('openInvites');
+  if (select(s => s.invites.length === 0)) newInvite();
+}
+
+export function closeInvites() {
+  dispatch('closeInvites');
+}
+
+/** Generate one more single-use invite (independent offer + link). */
+export async function newInvite() {
+  const id = crypto.randomUUID();
+  dispatch('addInvite', id);
   try {
-    const { offerLink, acceptAnswer } = await mesh.createInvite(select(s => s.myId), select(s => s.myName));
-    acceptAnswerFn = acceptAnswer;
-    dispatch('setOfferReady', offerLink);
+    const { offerLink, acceptAnswer } = await mesh.createInvite(
+      select(s => s.myId),
+      select(s => s.myName),
+    );
+    acceptAnswerFns.set(id, acceptAnswer);
+    dispatch('setInviteReady', id, offerLink);
   } catch (err) {
-    dispatch('setInviteError', err instanceof Error ? err.message : 'Failed to create invite');
+    dispatch('setInviteError', id, err instanceof Error ? err.message : 'Failed to create invite');
   }
 }
 
-/** @param {string} answerInput */
-export async function submitAnswer(answerInput) {
-  if (!acceptAnswerFn) return;
-  dispatch('setConnecting');
+/**
+ * Complete the connection for one ticket using the guest's pasted answer token.
+ * @param {string} inviteId
+ * @param {string} answerInput
+ */
+export async function submitInviteAnswer(inviteId, answerInput) {
+  const acceptAnswer = acceptAnswerFns.get(inviteId);
+  if (!acceptAnswer) return;
+  dispatch('setInviteConnecting', inviteId);
   try {
-    await acceptAnswerFn(answerInput);
-    acceptAnswerFn = null;
-    dispatch('cancelInvite');
+    await acceptAnswer(answerInput);
+    // Read the guest's name from the answer token for the "Connected to …" label.
+    let name = 'guest';
+    try {
+      const data = /** @type {{ name?: unknown }} */ (await decodeToken(extractToken(answerInput)));
+      if (typeof data.name === 'string' && data.name.trim()) name = data.name;
+    } catch { /* name is cosmetic; ignore decode issues here */ }
+    acceptAnswerFns.delete(inviteId);
+    dispatch('markInviteConnected', inviteId, name);
   } catch (err) {
-    dispatch('setInviteError', err instanceof Error ? err.message : 'Failed to connect');
+    dispatch('setInviteError', inviteId, err instanceof Error ? err.message : 'Failed to connect');
   }
 }
 
-export function cancelInvite() {
-  acceptAnswerFn = null;
-  dispatch('cancelInvite');
+/** Discard a ticket (its unused link stops working). */
+export function removeInvite(inviteId) {
+  acceptAnswerFns.delete(inviteId);
+  dispatch('removeInvite', inviteId);
 }
 
 // --- Join flow ---

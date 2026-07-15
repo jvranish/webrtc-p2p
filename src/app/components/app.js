@@ -2,7 +2,7 @@
 
 import { html, asComponent } from 'scaffold-html';
 import { dispatch } from '../state.js';
-import { setName, startMedia, toggleScreenShare, startInvite, toggleSettings } from '../actions.js';
+import { setName, startMedia, toggleScreenShare, openInvites, toggleSettings } from '../actions.js';
 import { cast } from '../utils.js';
 import { icon } from '../icons.js';
 import { ChatPanel } from './chat-panel.js';
@@ -167,8 +167,7 @@ const TopNav = (state) => {
 
       <div class="nav-group">
         <button
-          onclick=${() => startInvite()}
-          disabled=${state.invitePhase !== 'idle'}
+          onclick=${() => openInvites()}
         >${icon.invite()} Invite</button>
         <button
           class=${state.chatOpen ? 'active' : ''}
